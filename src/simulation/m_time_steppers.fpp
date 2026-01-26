@@ -627,7 +627,7 @@ contains
             if (ib) then
                 ! check if any IBMS are moving, and if so, update the markers, ghost points, levelsets, and levelset norms
                 if (moving_immersed_boundary_flag) then
-                    call s_propagate_immersed_boundaries(s)
+                    call s_propagate_immersed_boundaries(s,t_step)
                 end if
 
                 ! update the ghost fluid properties point values based on IB state
@@ -790,13 +790,21 @@ contains
 
     end subroutine s_apply_bodyforces
 
-    subroutine s_propagate_immersed_boundaries(s)
+    subroutine s_propagate_immersed_boundaries(s, t_step)
 
         integer, intent(in) :: s
+        integer, intent(in) :: t_step
         integer :: i
         logical :: forces_computed
 
         forces_computed = .false.
+
+        ! Compute forces for ALL IBs at first RK stage
+        if (s == 1 .and. .not. forces_computed) then
+            call s_compute_ib_forces(q_prim_vf, fluid_pp)
+            call s_write_ib_force_data(t_step)
+            forces_computed = .true.
+        end if
 
         do i = 1, num_ibs
             if (s == 1) then
@@ -816,11 +824,7 @@ contains
                     ! plug in analytic velocities for 1-way coupling, if it exists
                     @:mib_analytical()
                 else if (patch_ib(i)%moving_ibm == 2) then ! if we are using two-way coupling, apply force and torque
-                    ! compute the force and torque on the IB from the fluid
-                    if (.not. forces_computed) then
-                        call s_compute_ib_forces(q_prim_vf, fluid_pp)
-                        forces_computed = .true.
-                    end if
+                    ! Forces already computed above, just apply them here
 
                     ! update the velocity from the force value
                     patch_ib(i)%vel = patch_ib(i)%vel + rk_coef(s, 3)*dt*(patch_ib(i)%force/patch_ib(i)%mass)/rk_coef(s, 4)
