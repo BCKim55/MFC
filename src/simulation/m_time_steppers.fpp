@@ -625,11 +625,8 @@ contains
             if (adv_n) call s_comp_alpha_from_n(q_cons_ts(1)%vf)
 
             if (ib) then
-                ! check if any IBMS are moving, and if so, update the markers, ghost points, levelsets, and levelset norms
-                if (moving_immersed_boundary_flag) then
-                    call s_propagate_immersed_boundaries(s,t_step)
-                end if
-
+                call s_propagate_immersed_boundaries(s,t_step)
+                
                 ! update the ghost fluid properties point values based on IB state
                 if (qbmm .and. .not. polytropic) then
                     call s_ibm_correct_state(q_cons_ts(1)%vf, q_prim_vf, pb_ts(1)%sf, mv_ts(1)%sf)
@@ -799,11 +796,16 @@ contains
 
         forces_computed = .false.
 
-        ! Compute forces for ALL IBs at first RK stage
+        ! Compute forces for ALL IBs at first RK stage and write to file
         if (s == 1 .and. .not. forces_computed) then
             call s_compute_ib_forces(q_prim_vf, fluid_pp)
             call s_write_ib_force_data(t_step)
             forces_computed = .true.
+        end if
+        
+        ! check if any IBMS are moving, and if so, update the markers, ghost points, levelsets, and levelset norms
+        if (.not. moving_immersed_boundary_flag) then
+            return
         end if
 
         do i = 1, num_ibs

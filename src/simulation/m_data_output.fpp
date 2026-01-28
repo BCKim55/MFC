@@ -286,13 +286,13 @@ contains
             else
                 open (3000 + i, FILE=trim(file_path), &
                       FORM='formatted', &
-                      STATUS='unknown')
+                      STATUS='new')
 
                 ! Write header only for new files
                 if (proc_rank == 0) then
-                    if (num_dims == 3) then
+                    if (p > 0) then  ! 3D case (changed from num_dims == 3)
                         write (3000 + i, '(A)') '# time fx fy fz tau_x tau_y tau_z'
-                    else
+                    else  ! 2D case
                         write (3000 + i, '(A)') '# time fx fy tau_z'
                     end if
                 end if
@@ -1831,17 +1831,18 @@ contains
         end if
 
         do i = 1, num_ibs
-            if (num_dims == 3) then
+            if (p > 0) then ! 3D case
                 write (3000 + i, '(7(ES23.16,1X))') &
                     nondim_time, &
                     patch_ib(i)%force(1), patch_ib(i)%force(2), patch_ib(i)%force(3), &
                     patch_ib(i)%torque(1), patch_ib(i)%torque(2), patch_ib(i)%torque(3)
-            else
+            else ! 2D case
                 write (3000 + i, '(4(ES23.16,1X))') &
                     nondim_time, &
                     patch_ib(i)%force(1), patch_ib(i)%force(2), &
                     patch_ib(i)%torque(3)
             end if
+            flush(3000 + i)  ! Add flush to ensure data is written
         end do
 
     end subroutine s_write_ib_force_data
@@ -1933,8 +1934,9 @@ contains
         end if
 
         ! Open IB force files if immersed boundaries are present
-        if (ib) then
-            call s_open_ib_force_files()
+        
+        if (ib .and. proc_rank == 0) then
+            call s_open_ib_force_files()  
         end if
 
         if (down_sample) then
@@ -1968,7 +1970,7 @@ contains
         end if
 
         ! Close IB force files
-        if (ib) then
+        if (ib .and. proc_rank == 0) then
             call s_close_ib_force_files()
         end if
 
