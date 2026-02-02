@@ -2,7 +2,7 @@ import json
 import math
 
 Mu = 1.84e-05
-gam_a = 1.22
+gam_a = 1.4
 gam_b = 1.1
 
 # Configuring case dictionary
@@ -22,7 +22,7 @@ print(
             "m": 600,
             "n": 360,
             "p": 0,
-            "dt": 0.57e-5 / 2,
+            "dt": 1.0e-10,
             "t_step_start": 0,
             "t_step_stop": 7200,  # 3000
             "t_step_save": 30,  # 10
@@ -44,7 +44,7 @@ print(
             # Reconstruct the primitive variables to minimize spurious
             # Use WENO5
             "weno_order": 5,
-            "weno_eps": 1.0e-16,
+            "weno_eps": 1.0e-6,
             "weno_Re_flux": "F",
             "weno_avg": "T",
             "avg_state": 2,
@@ -59,8 +59,8 @@ print(
             # non-reflective boundary conditions at the domain edges
             "bc_x%beg": -3,
             "bc_x%end": -3,
-            "bc_y%beg": -3,
-            "bc_y%end": -3,
+            "bc_y%beg": -1,
+            "bc_y%end": -1,
             # Set IB to True and add 1 patch
             "ib": "T",
             "num_ibs": 1,
@@ -73,32 +73,35 @@ print(
             # Patch: Constant Tube filled with air
             # Specify the cylindrical air tube grid geometry
             "patch_icpp(1)%geometry": 3,
-            "patch_icpp(1)%x_centroid": 3.0e-03,
+            "patch_icpp(1)%x_centroid": 5.0e-03,
             # Uniform medium density, centroid is at the center of the domain
             "patch_icpp(1)%y_centroid": 3.0e-03,
-            "patch_icpp(1)%length_x": 6.0e-03,
+            "patch_icpp(1)%length_x": 1.0e-02,
             "patch_icpp(1)%length_y": 6.0e-03,
             # Specify the patch primitive variables
             "patch_icpp(1)%vel(1)": 0.1e00,
             "patch_icpp(1)%vel(2)": 0.0e00,
             "patch_icpp(1)%pres": 1.0e00,
-            "patch_icpp(1)%alpha_rho(1)": 0.8e00,
-            "patch_icpp(1)%alpha(1)": 0.8e00,
-            "patch_icpp(1)%alpha_rho(2)": 0.2e00,
-            "patch_icpp(1)%alpha(2)": 0.2e00,
+            "patch_icpp(1)%alpha_rho(1)": 1.0e00,
+            "patch_icpp(1)%alpha(1)": 1.0e00,
+            "patch_icpp(1)%alpha_rho(2)": 0.0e00,
+            "patch_icpp(1)%alpha(2)": 0.0e00,
             # Patch: cylinder Immersed Boundary
-            "patch_ib(1)%geometry": 8,
+            "patch_ib(1)%geometry": 2,
             "patch_ib(1)%x_centroid": 1.05e-03,
             "patch_ib(1)%y_centroid": 3.0e-03,
-            "patch_ib(1)%radius" : 2.5e-4
+            "patch_ib(1)%radius" : 2.5e-4,
             "patch_ib(1)%p": 0.4,
             "patch_ib(1)%m": 0.02,
             # Fluids Physical Parameters
             # Use the same stiffness as the air bubble
+            "viscous": "F",
             "fluid_pp(1)%gamma": 1.0e00 / (gam_a - 1.0e00),  # 2.50 (Not 1.40)
             "fluid_pp(1)%pi_inf": 0,
             "fluid_pp(2)%gamma": 1.0e00 / (gam_b - 1.0e00),  # 2.50 (Not 1.40)
             "fluid_pp(2)%pi_inf": 0,
+            #"fluid_pp(1)%Re(1)" : 200.0,
+            #"fluid_pp(2)%Re(1)" : 200.0
         }
     )
 )
