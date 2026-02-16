@@ -845,7 +845,7 @@ contains
                 patch_ib(i)%y_centroid = (rk_coef(s, 1)*patch_ib(i)%step_y_centroid + rk_coef(s, 2)*patch_ib(i)%y_centroid + rk_coef(s, 3)*patch_ib(i)%vel(2)*dt)/rk_coef(s, 4)
                 patch_ib(i)%z_centroid = (rk_coef(s, 1)*patch_ib(i)%step_z_centroid + rk_coef(s, 2)*patch_ib(i)%z_centroid + rk_coef(s, 3)*patch_ib(i)%vel(3)*dt)/rk_coef(s, 4)
 
-                !IBM-only periodic wrapping (sperating flow and IBM patch) BC-20260214
+                !IBM-only periodic wrapping (separating flow and IBM patch) BC-20260214
                 call s_wrap_ib_coord(patch_ib(i)%x_centroid, patch_ib(i)%step_x_centroid, x_domain%beg, x_domain%end, patch_ib(i)%periodic_wrap(1))
                 call s_wrap_ib_coord(patch_ib(i)%y_centroid, patch_ib(i)%step_y_centroid, y_domain%beg, y_domain%end, patch_ib(i)%periodic_wrap(2))
                 if (num_dims == 3) then
