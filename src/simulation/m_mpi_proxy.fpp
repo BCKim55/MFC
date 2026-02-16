@@ -219,6 +219,7 @@ contains
             #:endfor
             call MPI_BCAST(patch_ib(i)%geometry, 1, MPI_INTEGER, 0, MPI_COMM_WORLD, ierr)
             call MPI_BCAST(patch_ib(i)%moving_ibm, 1, MPI_INTEGER, 0, MPI_COMM_WORLD, ierr)
+            call MPI_BCAST(patch_ib(i)%periodic_wrap, 3, MPI_LOGICAL, 0, MPI_COMM_WORLD, ierr) !BC20260214
         end do
 
         do j = 1, num_probes_max

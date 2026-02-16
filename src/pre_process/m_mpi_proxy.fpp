@@ -135,6 +135,7 @@ contains
                 call MPI_BCAST(patch_ib(i)%${VAR}$, 1, mpi_p, 0, MPI_COMM_WORLD, ierr)
             #:endfor
             call MPI_BCAST(patch_ib(i)%slip, 1, MPI_LOGICAL, 0, MPI_COMM_WORLD, ierr)
+            call MPI_BCAST(patch_ib(i)%periodic_wrap, 3, MPI_LOGICAL, 0, MPI_COMM_WORLD, ierr) !BC-20260214
 
             #:for VAR in [ 'model_translate', 'model_scale', 'model_rotate']
                 call MPI_BCAST(patch_ib(i)%${VAR}$, size(patch_ib(i)%${VAR}$), mpi_p, 0, MPI_COMM_WORLD, ierr)

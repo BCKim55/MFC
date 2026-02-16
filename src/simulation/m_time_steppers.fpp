@@ -844,12 +844,46 @@ contains
                 patch_ib(i)%x_centroid = (rk_coef(s, 1)*patch_ib(i)%step_x_centroid + rk_coef(s, 2)*patch_ib(i)%x_centroid + rk_coef(s, 3)*patch_ib(i)%vel(1)*dt)/rk_coef(s, 4)
                 patch_ib(i)%y_centroid = (rk_coef(s, 1)*patch_ib(i)%step_y_centroid + rk_coef(s, 2)*patch_ib(i)%y_centroid + rk_coef(s, 3)*patch_ib(i)%vel(2)*dt)/rk_coef(s, 4)
                 patch_ib(i)%z_centroid = (rk_coef(s, 1)*patch_ib(i)%step_z_centroid + rk_coef(s, 2)*patch_ib(i)%z_centroid + rk_coef(s, 3)*patch_ib(i)%vel(3)*dt)/rk_coef(s, 4)
+
+                !IBM-only periodic wrapping (sperating flow and IBM patch) BC-20260214
+                call s_wrap_ib_coord(patch_ib(i)%x_centroid, patch_ib(i)%step_x_centroid, x_domain%beg, x_domain%end, patch_ib(i)%periodic_wrap(1))
+                call s_wrap_ib_coord(patch_ib(i)%y_centroid, patch_ib(i)%step_y_centroid, y_domain%beg, y_domain%end, patch_ib(i)%periodic_wrap(2))
+                if (num_dims == 3) then
+                        call s_wrap_ib_coord(patch_ib(i)%z_centroid, patch_ib(i)%step_z_centroid, z_domain%beg, z_domain%end, patch_ib(i)%periodic_wrap(3))
+                endif
             end if
         end do
 
         call s_update_mib(num_ibs, levelset, levelset_norm)
 
     end subroutine s_propagate_immersed_boundaries
+
+    !BC - 20260214
+    subroutine s_wrap_ib_coord(coord, step_coord, begv, endv, enabled)
+        real(wp), intent(inout) :: coord
+        real(wp), intent(inout) :: step_coord
+        real(wp), intent(in)    :: begv, endv
+        logical, intent(in)     :: enabled
+        real(wp) :: L, shift
+
+        if (.not. enabled) return
+        L = endv - begv
+        if (L <= 0._wp) return
+
+        shift = 0._wp
+        do while (coord < begv)
+            coord = coord + L
+            shift = shift + L
+        end do
+        do while (coord >= endv)
+            coord = coord - L
+            shift = shift - L
+        end do
+
+        step_coord = step_coord + shift
+    end subroutine s_wrap_ib_coord
+
+
 
     !> This subroutine saves the temporary q_prim_vf vector
         !!      into the q_prim_ts vector that is then used in p_main
