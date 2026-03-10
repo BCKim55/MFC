@@ -1,16 +1,11 @@
 !>
-!! @file m_time_steppers.f90
+!! @file
 !! @brief Contains module m_time_steppers
 
 #:include 'macros.fpp'
 #:include 'case.fpp'
 
-!> @brief The following module features a variety of time-stepping schemes.
-!!              Currently, it includes the following Runge-Kutta (RK) algorithms:
-!!                   1) 1st Order TVD RK
-!!                   2) 2nd Order TVD RK
-!!                   3) 3rd Order TVD RK
-!!              where TVD designates a total-variation-diminishing time-stepper.
+!> @brief Total-variation-diminishing (TVD) Runge--Kutta time integrators (1st-, 2nd-, and 3rd-order SSP)
 module m_time_steppers
 
     use m_derived_types        !< Definitions of the derived types
@@ -84,6 +79,7 @@ module m_time_steppers
 
     $:GPU_DECLARE(create='[q_cons_ts,q_prim_vf,q_T_sf,rhs_vf,q_prim_ts1,q_prim_ts2,rhs_mv,rhs_pb,max_dt,rk_coef,stor,bc_type]')
 
+!> @cond
 #if defined(__NVCOMPILER_GPU_UNIFIED_MEM)
     real(stp), allocatable, dimension(:, :, :, :), pinned, target :: q_cons_ts_pool_host
 #elif defined(FRONTIER_UNIFIED)
@@ -92,6 +88,7 @@ module m_time_steppers
     integer(kind=8) :: pool_size
     type(c_ptr) :: cptr_host, cptr_device
 #endif
+!> @endcond
 
 contains
 
@@ -129,6 +126,7 @@ contains
             @:PREFER_GPU(q_cons_ts(i)%vf)
         end do
 
+!> @cond
 #if defined(__NVCOMPILER_GPU_UNIFIED_MEM)
         if (num_ts == 2 .and. nv_uvm_out_of_core) then
             ! host allocation for q_cons_ts(2)%vf(j)%sf for all j
@@ -218,6 +216,7 @@ contains
             end do
         end do
 #else
+!> @endcond
         do i = 1, num_ts
             do j = 1, sys_size
                 @:ALLOCATE(q_cons_ts(i)%vf(j)%sf(idwbuff(1)%beg:idwbuff(1)%end, &
@@ -226,7 +225,9 @@ contains
             end do
             @:ACC_SETUP_VFs(q_cons_ts(i))
         end do
+!> @cond
 #endif
+!> @endcond
 
         ! Allocating the cell-average primitive ts variables
         if (probe_wrt) then
@@ -319,6 +320,13 @@ contains
                     idwbuff(2)%beg:idwbuff(2)%end, &
                     idwbuff(3)%beg:idwbuff(3)%end))
                 @:ACC_SETUP_SFs(q_prim_vf(damage_idx))
+            end if
+
+            if (hyper_cleaning) then
+                @:ALLOCATE(q_prim_vf(psi_idx)%sf(idwbuff(1)%beg:idwbuff(1)%end, &
+                    idwbuff(2)%beg:idwbuff(2)%end, &
+                    idwbuff(3)%beg:idwbuff(3)%end))
+                @:ACC_SETUP_SFs(q_prim_vf(psi_idx))
             end if
 
             if (model_eqns == 3) then
@@ -464,14 +472,18 @@ contains
 
         @:ALLOCATE(bc_type(1,1)%sf(0:0,0:n,0:p))
         @:ALLOCATE(bc_type(1,2)%sf(0:0,0:n,0:p))
-        if (n > 0) then
-            @:ALLOCATE(bc_type(2,1)%sf(-buff_size:m+buff_size,0:0,0:p))
-            @:ALLOCATE(bc_type(2,2)%sf(-buff_size:m+buff_size,0:0,0:p))
-            if (p > 0) then
-                @:ALLOCATE(bc_type(3,1)%sf(-buff_size:m+buff_size,-buff_size:n+buff_size,0:0))
-                @:ALLOCATE(bc_type(3,2)%sf(-buff_size:m+buff_size,-buff_size:n+buff_size,0:0))
+        #:if not MFC_CASE_OPTIMIZATION or num_dims > 1
+            if (n > 0) then
+                @:ALLOCATE(bc_type(2,1)%sf(-buff_size:m+buff_size,0:0,0:p))
+                @:ALLOCATE(bc_type(2,2)%sf(-buff_size:m+buff_size,0:0,0:p))
+                #:if not MFC_CASE_OPTIMIZATION or num_dims > 2
+                    if (p > 0) then
+                        @:ALLOCATE(bc_type(3,1)%sf(-buff_size:m+buff_size,-buff_size:n+buff_size,0:0))
+                        @:ALLOCATE(bc_type(3,2)%sf(-buff_size:m+buff_size,-buff_size:n+buff_size,0:0))
+                    end if
+                #:endif
             end if
-        end if
+        #:endif
 
         do i = 1, num_dims
             do j = 1, 2
@@ -504,6 +516,7 @@ contains
 
     end subroutine s_initialize_time_steppers_module
 
+    !> @brief Advances the solution one full step using a TVD Runge-Kutta time integrator.
     impure subroutine s_tvd_rk(t_step, time_avg, nstage)
 #ifdef _CRAYFTN
         !DIR$ OPTIMIZE (-haggress)
@@ -527,9 +540,10 @@ contains
 
             if (s == 1) then
                 if (run_time_info) then
-                    if (igr) then
+                    if (igr .or. dummy) then
                         call s_write_run_time_information(q_cons_ts(1)%vf, t_step)
-                    else
+                    end if
+                    if (.not. igr .or. dummy) then
                         call s_write_run_time_information(q_prim_vf, t_step)
                     end if
                 end if
@@ -625,7 +639,10 @@ contains
                     call s_ibm_correct_state(q_cons_ts(1)%vf, q_prim_vf)
                 end if
             end if
+
         end do
+
+        if (moving_immersed_boundary_flag) call s_wrap_periodic_ibs()
 
         ! Adaptive dt: final stage
         if (adap_dt) call s_adaptive_dt_bubble(3)
@@ -644,7 +661,7 @@ contains
     end subroutine s_tvd_rk
 
     !> Bubble source part in Strang operator splitting scheme
-        !! @param t_step Current time-step
+        !! @param stage Current time-stage
     impure subroutine s_adaptive_dt_bubble(stage)
 
         integer, intent(in) :: stage
@@ -681,13 +698,19 @@ contains
 
     end subroutine s_adaptive_dt_bubble
 
+    !> @brief Computes the global time step size from CFL stability constraints across all cells.
     impure subroutine s_compute_dt()
 
         real(wp) :: rho        !< Cell-avg. density
-        real(wp), dimension(num_vels) :: vel        !< Cell-avg. velocity
+        #:if not MFC_CASE_OPTIMIZATION and USING_AMD
+            real(wp), dimension(3) :: vel        !< Cell-avg. velocity
+            real(wp), dimension(3) :: alpha      !< Cell-avg. volume fraction
+        #:else
+            real(wp), dimension(num_vels) :: vel        !< Cell-avg. velocity
+            real(wp), dimension(num_fluids) :: alpha      !< Cell-avg. volume fraction
+        #:endif
         real(wp) :: vel_sum    !< Cell-avg. velocity sum
         real(wp) :: pres       !< Cell-avg. pressure
-        real(wp), dimension(num_fluids) :: alpha      !< Cell-avg. volume fraction
         real(wp) :: gamma      !< Cell-avg. sp. heat ratio
         real(wp) :: pi_inf     !< Cell-avg. liquid stiffness function
         real(wp) :: qv         !< Cell-avg. fluid reference energy
@@ -699,7 +722,7 @@ contains
         real(wp) :: dt_local
         integer :: j, k, l !< Generic loop iterators
 
-        if (.not. igr) then
+        if (.not. igr .or. dummy) then
             call s_convert_conservative_to_primitive_variables( &
                 q_cons_ts(1)%vf, &
                 q_T_sf, &
@@ -742,6 +765,9 @@ contains
 
     !> This subroutine applies the body forces source term at each
         !! Runge-Kutta stage
+        !! @param q_cons_vf Conservative variables
+        !! @param q_prim_vf_in Primitive variables
+        !! @param rhs_vf_in Right-hand side variables
     subroutine s_apply_bodyforces(q_cons_vf, q_prim_vf_in, rhs_vf_in, ldt)
 
         type(scalar_field), dimension(1:sys_size), intent(inout) :: q_cons_vf
@@ -772,11 +798,14 @@ contains
 
     end subroutine s_apply_bodyforces
 
+    !> @brief Updates immersed boundary positions and velocities at the current Runge-Kutta stage.
     subroutine s_propagate_immersed_boundaries(s)
 
         integer, intent(in) :: s
         integer :: i
         logical :: forces_computed
+
+        call nvtxStartRange("PROPAGATE-IMMERSED-BOUNDARIES")
 
         forces_computed = .false.
 
@@ -823,7 +852,9 @@ contains
             end if
         end do
 
-        call s_update_mib(num_ibs, levelset, levelset_norm)
+        call s_update_mib(num_ibs)
+
+        call nvtxEndRange
 
     end subroutine s_propagate_immersed_boundaries
 
@@ -992,6 +1023,10 @@ contains
 
             if (cont_damage) then
                 @:DEALLOCATE(q_prim_vf(damage_idx)%sf)
+            end if
+
+            if (hyper_cleaning) then
+                @:DEALLOCATE(q_prim_vf(psi_idx)%sf)
             end if
 
             if (bubbles_euler) then

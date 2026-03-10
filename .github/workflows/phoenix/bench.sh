@@ -1,22 +1,12 @@
 #!/bin/bash
 
-n_ranks=12
+source .github/scripts/bench-preamble.sh
 
-echo "My interface is:" $job_interface
-device_opts=""
-if [ "$job_device" = "gpu" ]; then
-    n_ranks=$(nvidia-smi -L | wc -l)        # number of GPUs on node
-    gpu_ids=$(seq -s ' ' 0 $(($n_ranks-1))) # 0,1,2,...,gpu_count-1
-    device_opts+="--gpu"
-    if [ "$job_interface" = "acc" ]; then
-        device_opts+=" acc"
-    elif [ "$job_interface" = "omp" ]; then
-        device_opts+=" mp"
-    fi
-    device_opts+=" -g $gpu_ids"
-fi
+# Cap parallel jobs at 64 to avoid overwhelming MPI daemons on large nodes
+# (GNR nodes have 192 cores but nproc is too aggressive for build/bench).
+n_jobs=$(( $(nproc) > 64 ? 64 : $(nproc) ))
 
-tmpbuild=/storage/scratch1/6/sbryngelson3/mytmp_build
+tmpbuild=/storage/project/r-sbryngelson3-0/sbryngelson3/mytmp_build
 currentdir=$tmpbuild/run-$(( RANDOM % 900 ))
 mkdir -p $tmpbuild
 mkdir -p $currentdir
@@ -24,10 +14,17 @@ mkdir -p $currentdir
 export TMPDIR=$currentdir
 
 if [ "$job_device" = "gpu" ]; then
-    ./mfc.sh bench --mem 12 -j $(nproc) -o "$job_slug.yaml" -- -c phoenix-bench $device_opts -n $n_ranks
+    bench_opts="--mem 4"
 else
-    ./mfc.sh bench --mem 1 -j $(nproc) -o "$job_slug.yaml" -- -c phoenix-bench $device_opts -n $n_ranks
+    bench_opts="--mem 1"
 fi
+
+rm -rf build
+
+source .github/scripts/retry-build.sh
+retry_build ./mfc.sh build -j $n_jobs $build_opts || exit 1
+
+./mfc.sh bench $bench_opts -j $n_jobs -o "$job_slug.yaml" -- -c phoenix-bench $device_opts -n $n_ranks
 
 sleep 10
 rm -rf "$currentdir" || true
