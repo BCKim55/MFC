@@ -234,8 +234,8 @@ _SIMPLE_DESCS = {
     "collision_time": "Characteristic collision time for IB collisions",
     "ib_coefficient_of_friction": "Coefficient of friction for IB collisions",
     # LSO variable-weight filter
-    "lso_filter":    "Enable LSO variable-weight Gaussian filter (applied at save steps)",
-    "filter_sigma":  "Target Gaussian filter standard deviation (physical units, same as domain coordinates)",
+    "lso_filter": "Enable LSO variable-weight Gaussian filter (applied at save steps)",
+    "filter_sigma": "Target Gaussian filter standard deviation (physical units, same as domain coordinates)",
     "acoustic_source": "Enable acoustic sources",
     # Output
     "parallel_io": "Enable parallel I/O",
@@ -949,8 +949,12 @@ def _load():
         _r(n, LOG, {"output"})
 
     # LSO variable-weight filter
-    _r("lso_filter",   LOG,  {"filter"})
+    _r("lso_filter", LOG, {"filter"})
     _r("filter_sigma", REAL, {"filter"})
+    for n in ["lso_n_passes_x", "lso_n_passes_y", "lso_n_passes_z"]:
+        _r(n, INT, {"filter"})
+    for n in ["lso_a_x", "lso_a_y", "lso_a_z"]:
+        _r(n, REAL, {"filter"})
     for n in [
         "schlieren_wrt",
         "alpha_rho_wrt",

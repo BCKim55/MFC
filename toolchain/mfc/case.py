@@ -138,9 +138,7 @@ class Case:
         try:
             radius = float(p["patch_ib(1)%radius"])
         except KeyError:
-            raise common.MFCException(
-                "lso_filter = T requires patch_ib(1)%radius to be set."
-            )
+            raise common.MFCException("lso_filter = T requires patch_ib(1)%radius to be set.")
         d_p = 2.0 * radius
 
         # Grid spacing (uniform grid assumed)

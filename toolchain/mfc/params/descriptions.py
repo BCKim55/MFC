@@ -255,6 +255,15 @@ DESCRIPTIONS = {
     "collision_model": "Integer selecting the collision model being used. 0 for no collision. 1 for soft-sphere collisions",
     "collision_time": "Amount of simulation time each collision will take to resolve",
     "ib_coefficient_of_friction": "coefficient of friction used in IB collisions",
+    # LSO variable-weight Gaussian filter
+    "lso_filter": "Enable LSO variable-weight Gaussian filter applied to conserved variables at each data-save step",
+    "filter_sigma": "Target Gaussian filter standard deviation in physical units (same as domain coordinates)",
+    "lso_n_passes_x": "Number of LSO filter passes in x-direction (auto-derived from particle diameter and grid spacing)",
+    "lso_n_passes_y": "Number of LSO filter passes in y-direction (auto-derived from particle diameter and grid spacing)",
+    "lso_n_passes_z": "Number of LSO filter passes in z-direction (auto-derived from particle diameter and grid spacing)",
+    "lso_a_x": "LSO per-pass 9-point stencil coefficients in x (5 x lso_max_passes, column-major, auto-computed)",
+    "lso_a_y": "LSO per-pass 9-point stencil coefficients in y (5 x lso_max_passes, column-major, auto-computed)",
+    "lso_a_z": "LSO per-pass 9-point stencil coefficients in z (5 x lso_max_passes, column-major, auto-computed)",
 }
 
 # Patterns for auto-generating descriptions of indexed parameters
