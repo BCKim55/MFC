@@ -22,26 +22,21 @@ References:
 
 from __future__ import annotations
 
-import numpy as np
 from typing import List, Tuple
 
+import numpy as np
+
 # ── tuneable constants (must match Fortran side) ──────────────────────────────
-LSO_MAX_PASSES: int   = 60     # upper bound on filter passes; matches lso_max_passes in Fortran
-_CONV_TOL:      float = 1e-3   # default frequency-domain L2 convergence tolerance
-_N_XI:          int   = 600    # quadrature points over [0, pi]
+LSO_MAX_PASSES: int = 60  # upper bound on filter passes; matches lso_max_passes in Fortran
+_CONV_TOL: float = 1e-3  # default frequency-domain L2 convergence tolerance
+_N_XI: int = 600  # quadrature points over [0, pi]
 # ─────────────────────────────────────────────────────────────────────────────
 
 
 def _filter_tf(coeffs: np.ndarray, xi: np.ndarray) -> np.ndarray:
     """Evaluate the 9-point filter transfer function at wavenumbers xi."""
     a0, a1, a2, a3, a4 = coeffs
-    return (
-        a0
-        + 2.0 * a1 * np.cos(xi)
-        + 2.0 * a2 * np.cos(2.0 * xi)
-        + 2.0 * a3 * np.cos(3.0 * xi)
-        + 2.0 * a4 * np.cos(4.0 * xi)
-    )
+    return a0 + 2.0 * a1 * np.cos(xi) + 2.0 * a2 * np.cos(2.0 * xi) + 2.0 * a3 * np.cos(3.0 * xi) + 2.0 * a4 * np.cos(4.0 * xi)
 
 
 def _taylor_init(sigma_per_pass: float) -> np.ndarray:
@@ -52,8 +47,8 @@ def _taylor_init(sigma_per_pass: float) -> np.ndarray:
     O(xi^8) by equating coefficients at xi = 1, 2, 3, 4 (in normalised units)
     plus the normalisation constraint H(0) = 1.
     """
-    r0  = min(sigma_per_pass, 1.38)
-    r02 = r0 ** 2
+    r0 = min(sigma_per_pass, 1.38)
+    r02 = r0**2
 
     rows = []
     for m in [1, 2, 3, 4]:
@@ -61,7 +56,7 @@ def _taylor_init(sigma_per_pass: float) -> np.ndarray:
             1.0,
             -(m * r02) / 2.0,
             (m * r02) ** 2 / 8.0,
-            -(m * r02) ** 3 / 48.0,
+            -((m * r02) ** 3) / 48.0,
             (m * r02) ** 4 / 384.0,
         ]
         rows.append(row)
@@ -102,15 +97,17 @@ def design_lso_filter(
     Returns:
         List of n_passes tuples (a0, a1, a2, a3, a4).
     """
-    xi  = np.linspace(0.0, np.pi, n_xi)
-    G   = np.exp(-0.5 * sigma_target**2 * xi**2)
-    Phi = np.column_stack([
-        np.ones(n_xi),
-        2.0 * np.cos(xi),
-        2.0 * np.cos(2.0 * xi),
-        2.0 * np.cos(3.0 * xi),
-        2.0 * np.cos(4.0 * xi),
-    ])
+    xi = np.linspace(0.0, np.pi, n_xi)
+    G = np.exp(-0.5 * sigma_target**2 * xi**2)
+    Phi = np.column_stack(
+        [
+            np.ones(n_xi),
+            2.0 * np.cos(xi),
+            2.0 * np.cos(2.0 * xi),
+            2.0 * np.cos(3.0 * xi),
+            2.0 * np.cos(4.0 * xi),
+        ]
+    )
     c = np.array([1.0, 2.0, 2.0, 2.0, 2.0])  # H(0)=1 constraint vector
 
     sigma_per_pass = sigma_target / np.sqrt(max(n_passes, 1))
@@ -125,13 +122,13 @@ def design_lso_filter(
                 if j != k:
                     H_rest *= Phi @ b
 
-            Phi_w  = H_rest[:, None] * Phi
-            A_w    = Phi_w.T @ Phi_w + 1e-9 * np.eye(5)
-            rhs    = Phi_w.T @ G
-            A_inv  = np.linalg.inv(A_w)
+            Phi_w = H_rest[:, None] * Phi
+            A_w = Phi_w.T @ Phi_w + 1e-9 * np.eye(5)
+            rhs = Phi_w.T @ G
+            A_inv = np.linalg.inv(A_w)
             beta_u = A_inv @ rhs
             Ainv_c = A_inv @ c
-            lam    = (c @ beta_u - 1.0) / (c @ Ainv_c + 1e-12)
+            lam = (c @ beta_u - 1.0) / (c @ Ainv_c + 1e-12)
             betas[k] = beta_u - lam * Ainv_c
 
         delta = max(np.linalg.norm(betas[k] - prev[k]) for k in range(n_passes))
@@ -164,14 +161,14 @@ def find_min_lso_passes(
         (n_passes, err, coeffs_list)
     """
     xi = np.linspace(0.0, np.pi, n_xi)
-    G  = np.exp(-0.5 * sigma_target**2 * xi**2)
+    G = np.exp(-0.5 * sigma_target**2 * xi**2)
 
-    err    = float("inf")
+    err = float("inf")
     coeffs: List[Tuple[float, ...]] = []
 
     for n_passes in range(1, max_passes + 1):
         coeffs = design_lso_filter(sigma_target, n_passes, n_xi=n_xi)
-        H_cum  = np.ones(n_xi)
+        H_cum = np.ones(n_xi)
         for ck in coeffs:
             H_cum *= _filter_tf(np.array(ck), xi)
         err = float(np.sqrt(np.mean((H_cum - G) ** 2)))
@@ -214,22 +211,17 @@ def compute_lso_params(
 
     result: dict = {}
     for tag, d in directions:
-        sigma_target = filter_sigma / d   # convert physical -> grid-cell units
-        n_passes, err, coeffs = find_min_lso_passes(
-            sigma_target, conv_tol=conv_tol, max_passes=max_passes
-        )
+        sigma_target = filter_sigma / d  # convert physical -> grid-cell units
+        n_passes, err, coeffs = find_min_lso_passes(sigma_target, conv_tol=conv_tol, max_passes=max_passes)
         result[f"lso_n_passes_{tag}"] = n_passes
-        result[f"lso_a_{tag}"]        = coeffs
+        result[f"lso_a_{tag}"] = coeffs
         n_res = d_p / d
-        print(
-            f"  [LSO] {tag}-dir: N_res={n_res:.2f}, sigma_target={sigma_target:.2f} cells, "
-            f"N_passes={n_passes}, L2_err={err:.2e}"
-        )
+        print(f"  [LSO] {tag}-dir: N_res={n_res:.2f}, sigma_target={sigma_target:.2f} cells, N_passes={n_passes}, L2_err={err:.2e}")
 
     # For 2D, z-direction uses zero passes and dummy weights
     if dz <= 0.0:
         result["lso_n_passes_z"] = 0
-        result["lso_a_z"]        = []
+        result["lso_a_z"] = []
 
     return result
 
@@ -252,7 +244,7 @@ def lso_namelist_lines(lso_params: dict) -> str:
 
     for tag in ["x", "y", "z"]:
         n_passes = lso_params.get(f"lso_n_passes_{tag}", 0)
-        coeffs   = lso_params.get(f"lso_a_{tag}",        [])
+        coeffs = lso_params.get(f"lso_a_{tag}", [])
 
         lines.append(f"lso_n_passes_{tag} = {n_passes}")
 
