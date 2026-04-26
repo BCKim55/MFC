@@ -354,6 +354,21 @@ module m_global_parameters
     $:GPU_DECLARE(create='[ib_coefficient_of_friction]')
     !> @}
 
+    !> @name LSO variable-weight Gaussian filter
+    !> @{
+    integer, parameter :: lso_max_passes = 60  !< Maximum number of filter passes (must match Python LSO_MAX_PASSES)
+    logical  :: lso_filter       !< Enable LSO filter at save steps
+    real(wp) :: filter_sigma     !< Target Gaussian sigma in physical units
+    integer  :: lso_n_passes_x   !< Number of filter passes in x (derived from d_p/dx)
+    integer  :: lso_n_passes_y   !< Number of filter passes in y (derived from d_p/dy)
+    integer  :: lso_n_passes_z   !< Number of filter passes in z (derived from d_p/dz)
+    real(wp) :: lso_a_x(5, lso_max_passes)  !< Per-pass stencil coefficients in x
+    real(wp) :: lso_a_y(5, lso_max_passes)  !< Per-pass stencil coefficients in y
+    real(wp) :: lso_a_z(5, lso_max_passes)  !< Per-pass stencil coefficients in z
+    $:GPU_DECLARE(create='[lso_filter, lso_n_passes_x, lso_n_passes_y, lso_n_passes_z]')
+    $:GPU_DECLARE(create='[lso_a_x, lso_a_y, lso_a_z]')
+    !> @}
+
     !> @name Bubble modeling
     !> @{
     #:if MFC_CASE_OPTIMIZATION
@@ -642,6 +657,16 @@ contains
         collision_time = dflt_real
         ib_coefficient_of_friction = dflt_real
         ib_state_wrt = .false.
+
+        ! LSO variable-weight Gaussian filter
+        lso_filter = .false.
+        filter_sigma = dflt_real
+        lso_n_passes_x = 0
+        lso_n_passes_y = 0
+        lso_n_passes_z = 0
+        lso_a_x = 0.0_wp
+        lso_a_y = 0.0_wp
+        lso_a_z = 0.0_wp
 
         ! Bubble modeling
         bubbles_euler = .false.

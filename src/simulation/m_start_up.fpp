@@ -40,6 +40,7 @@ module m_start_up
 
     use m_nvtx
     use m_ibm
+    use m_lso_filter
     use m_compile_specific
     use m_checker_common
     use m_checker
@@ -112,7 +113,9 @@ contains
             & g_y, g_z, n_start, t_save, t_stop, cfl_adap_dt, cfl_const_dt, cfl_target, surface_tension, bubbles_lagrange, &
             & lag_params, hyperelasticity, R0ref, num_bc_patches, Bx0, cont_damage, tau_star, cont_damage_s, alpha_bar, &
             & hyper_cleaning, hyper_cleaning_speed, hyper_cleaning_tau, alf_factor, num_igr_iters, num_igr_warm_start_iters, &
-            & int_comp, ic_eps, ic_beta, nv_uvm_out_of_core, nv_uvm_igr_temps_on_gpu, nv_uvm_pref_gpu, down_sample, fft_wrt
+            & int_comp, ic_eps, ic_beta, nv_uvm_out_of_core, nv_uvm_igr_temps_on_gpu, nv_uvm_pref_gpu, down_sample, fft_wrt, &
+            & lso_filter, filter_sigma, lso_n_passes_x, lso_n_passes_y, lso_n_passes_z, &
+            & lso_a_x, lso_a_y, lso_a_z
 
         inquire (FILE=trim(file_path), EXIST=file_exist)
 
@@ -799,6 +802,18 @@ contains
             save_count = t_step
         end if
 
+        ! Apply LSO Gaussian filter before writing.
+        ! The filter kernels run on device data; afterwards copy filtered interior
+        ! back to host so s_write_data_files reads the correct values.
+        if (lso_filter) then
+            call s_apply_lso_filter(q_cons_ts(stor)%vf)
+            do i = 1, sys_size
+#ifndef FRONTIER_UNIFIED
+                $:GPU_UPDATE(host='[q_cons_ts(stor)%vf(i)%sf]')
+#endif
+            end do
+        end if
+
         if (bubbles_lagrange) then
             $:GPU_UPDATE(host='[lag_id, mtn_pos, mtn_posPrev, mtn_vel, intfc_rad, intfc_vel, bub_R0, Rmax_stats, Rmin_stats, &
                          & bub_dphidt, gas_p, gas_mv, gas_mg, gas_betaT, gas_betaC]')
@@ -860,6 +875,7 @@ contains
         call s_initialize_mpi_proxy_module()
         call s_initialize_variables_conversion_module()
         if (grid_geometry == 3) call s_initialize_fftw_module()
+        if (lso_filter) call s_initialize_lso_filter_module()
 
         if (bubbles_euler) call s_initialize_bubbles_EE_module()
         if (ib) call s_initialize_ibm_module()
@@ -1120,6 +1136,7 @@ contains
         if (int_comp > 0) call s_finalize_thinc_module()
         call s_finalize_variables_conversion_module()
         if (grid_geometry == 3) call s_finalize_fftw_module
+        if (lso_filter) call s_finalize_lso_filter_module()
         call s_finalize_mpi_common_module()
         call s_finalize_global_parameters_module()
         call s_finalize_boundary_common_module()
