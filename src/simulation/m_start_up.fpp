@@ -836,7 +836,7 @@ contains
             call s_write_data_files(q_cons_ts(stor)%vf, q_T_sf, q_prim_vf, save_count, bc_type)
         end if
 
-        ! Write filtered fields to <case_dir>_lso when lso_filter_wrt is enabled. Bring filtered copy from device to host, then
+        ! Write filtered fields to <case_dir>/lso when lso_filter_wrt is enabled. Bring filtered copy from device to host, then
         ! redirect case_dir temporarily.
         if (lso_filter .and. lso_filter_wrt) then
             do i = 1, sys_size
@@ -845,7 +845,7 @@ contains
 #endif
             end do
             orig_case_dir = case_dir
-            case_dir = trim(case_dir) // '_lso'
+            case_dir = trim(case_dir) // '/lso'
             if (bubbles_lagrange) then
                 call s_write_data_files(q_filt_vf, q_T_sf, q_prim_vf, save_count, bc_type, q_beta(1))
             else
