@@ -49,6 +49,9 @@ module m_data_output
 
     type(scalar_field), allocatable, dimension(:) :: q_cons_temp_ds
 
+    !> Optional filename prefix for LSO-filtered output (set to 'lso_' before writing filtered fields, '' otherwise)
+    character(LEN=8), public :: lso_file_prefix = ''
+
 contains
 
     !> Write data files. Dispatch subroutine that replaces procedure pointer.
@@ -318,7 +321,7 @@ contains
         end if
 
         do i = 1, sys_size
-            write (file_path, '(A,I0,A)') trim(t_step_dir) // '/q_cons_vf', i, '.dat'
+            write (file_path, '(A,I0,A)') trim(t_step_dir) // '/' // trim(lso_file_prefix) // 'q_cons_vf', i, '.dat'
 
             open (2, FILE=trim(file_path), form='unformatted', STATUS='new')
 
@@ -328,7 +331,7 @@ contains
         ! Lagrangian beta (void fraction) written as q_cons_vf(sys_size+1) to match the parallel I/O path and allow post_process to
         ! read it.
         if (bubbles_lagrange) then
-            write (file_path, '(A,I0,A)') trim(t_step_dir) // '/q_cons_vf', sys_size + 1, '.dat'
+            write (file_path, '(A,I0,A)') trim(t_step_dir) // '/' // trim(lso_file_prefix) // 'q_cons_vf', sys_size + 1, '.dat'
 
             open (2, FILE=trim(file_path), form='unformatted', STATUS='new')
 
@@ -696,7 +699,7 @@ contains
             call s_initialize_mpi_data(q_cons_vf)
 
             write (file_loc, '(I0,A,i7.7,A)') t_step, '_', proc_rank, '.dat'
-            file_loc = trim(case_dir) // '/restart_data/lustre_' // trim(t_step_string) // trim(mpiiofs) // trim(file_loc)
+            file_loc = trim(case_dir) // '/restart_data/lustre_' // trim(t_step_string) // trim(mpiiofs) // trim(lso_file_prefix) // trim(file_loc)
             inquire (FILE=trim(file_loc), EXIST=file_exist)
             if (file_exist .and. proc_rank == 0) then
                 call MPI_FILE_DELETE(file_loc, mpi_info_int, ierr)
@@ -763,7 +766,7 @@ contains
             end if
 
             write (file_loc, '(I0,A)') t_step, '.dat'
-            file_loc = trim(case_dir) // '/restart_data' // trim(mpiiofs) // trim(file_loc)
+            file_loc = trim(case_dir) // '/restart_data' // trim(mpiiofs) // trim(lso_file_prefix) // trim(file_loc)
             inquire (FILE=trim(file_loc), EXIST=file_exist)
             if (file_exist .and. proc_rank == 0) then
                 call MPI_FILE_DELETE(file_loc, mpi_info_int, ierr)
