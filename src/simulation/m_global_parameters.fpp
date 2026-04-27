@@ -355,6 +355,7 @@ module m_global_parameters
     !> @{
     integer, parameter :: lso_max_passes = 60         !< Maximum number of filter passes (must match Python LSO_MAX_PASSES)
     logical            :: lso_filter                  !< Enable LSO filter at save steps
+    logical            :: lso_filter_wrt              !< Write filtered fields to a separate output directory (<case_dir>_lso)
     real(wp)           :: filter_sigma                !< Target Gaussian sigma in physical units
     integer            :: lso_n_passes_x              !< Number of filter passes in x (derived from d_p/dx)
     integer            :: lso_n_passes_y              !< Number of filter passes in y (derived from d_p/dy)
@@ -657,6 +658,7 @@ contains
 
         ! LSO variable-weight Gaussian filter
         lso_filter = .false.
+        lso_filter_wrt = .false.
         filter_sigma = dflt_real
         lso_n_passes_x = 0
         lso_n_passes_y = 0

@@ -232,6 +232,7 @@ _SIMPLE_DESCS = {
     "ib_coefficient_of_friction": "Coefficient of friction for IB collisions",
     # LSO variable-weight filter
     "lso_filter": "Enable LSO variable-weight Gaussian filter (applied at save steps)",
+    "lso_filter_wrt": "Write filtered fields to a separate output directory (<case_dir>_lso); unfiltered data is written to the primary output",
     "filter_sigma": "Target Gaussian filter standard deviation (physical units, same as domain coordinates)",
     "acoustic_source": "Enable acoustic sources",
     # Output
@@ -939,6 +940,7 @@ def _load():
 
     # LSO variable-weight filter
     _r("lso_filter", LOG, {"filter"})
+    _r("lso_filter_wrt", LOG, {"filter"})
     _r("filter_sigma", REAL, {"filter"})
     for n in ["lso_n_passes_x", "lso_n_passes_y", "lso_n_passes_z"]:
         _r(n, INT, {"filter"})

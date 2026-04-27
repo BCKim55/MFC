@@ -113,7 +113,7 @@ contains
             & lag_params, hyperelasticity, R0ref, num_bc_patches, Bx0, cont_damage, tau_star, cont_damage_s, alpha_bar, &
             & hyper_cleaning, hyper_cleaning_speed, hyper_cleaning_tau, alf_factor, num_igr_iters, num_igr_warm_start_iters, &
             & int_comp, ic_eps, ic_beta, nv_uvm_out_of_core, nv_uvm_igr_temps_on_gpu, nv_uvm_pref_gpu, down_sample, fft_wrt, &
-            & lso_filter, filter_sigma, lso_n_passes_x, lso_n_passes_y, lso_n_passes_z, lso_a_x, lso_a_y, lso_a_z
+            & lso_filter, lso_filter_wrt, filter_sigma, lso_n_passes_x, lso_n_passes_y, lso_n_passes_z, lso_a_x, lso_a_y, lso_a_z
 
         inquire (FILE=trim(file_path), EXIST=file_exist)
 
@@ -750,6 +750,7 @@ contains
         integer(kind=8)         :: i, j, k, l
         integer                 :: stor
         integer                 :: save_count
+        character(LEN=path_len) :: orig_case_dir
 
         if (down_sample) then
             call s_populate_variables_buffers(bc_type, q_cons_ts(1)%vf)
@@ -801,15 +802,20 @@ contains
             save_count = t_step
         end if
 
-        ! Apply LSO Gaussian filter before writing. The filter kernels run on device data; afterwards copy filtered interior back to
-        ! host so s_write_data_files reads the correct values.
+        ! LSO filter: when lso_filter_wrt is enabled, copy to q_filt_vf and filter the copy, leaving the original data untouched for
+        ! the primary write below. When lso_filter_wrt is disabled, apply the filter in place (legacy behavior) so the primary write
+        ! emits filtered output.
         if (lso_filter) then
-            call s_apply_lso_filter(q_cons_ts(stor)%vf)
-            do i = 1, sys_size
+            if (lso_filter_wrt) then
+                call s_copy_and_apply_lso_filter(q_cons_ts(stor)%vf)
+            else
+                call s_apply_lso_filter(q_cons_ts(stor)%vf)
+                do i = 1, sys_size
 #ifndef FRONTIER_UNIFIED
-                $:GPU_UPDATE(host='[q_cons_ts(stor)%vf(i)%sf]')
+                    $:GPU_UPDATE(host='[q_cons_ts(stor)%vf(i)%sf]')
 #endif
-            end do
+                end do
+            end if
         end if
 
         if (bubbles_lagrange) then
@@ -828,6 +834,24 @@ contains
             if (lag_params%write_bubbles_stats) call s_write_lag_bubble_stats()
         else
             call s_write_data_files(q_cons_ts(stor)%vf, q_T_sf, q_prim_vf, save_count, bc_type)
+        end if
+
+        ! Write filtered fields to <case_dir>_lso when lso_filter_wrt is enabled. Bring filtered copy from device to host, then
+        ! redirect case_dir temporarily.
+        if (lso_filter .and. lso_filter_wrt) then
+            do i = 1, sys_size
+#ifndef FRONTIER_UNIFIED
+                $:GPU_UPDATE(host='[q_filt_vf(i)%sf]')
+#endif
+            end do
+            orig_case_dir = case_dir
+            case_dir = trim(case_dir) // '_lso'
+            if (bubbles_lagrange) then
+                call s_write_data_files(q_filt_vf, q_T_sf, q_prim_vf, save_count, bc_type, q_beta(1))
+            else
+                call s_write_data_files(q_filt_vf, q_T_sf, q_prim_vf, save_count, bc_type)
+            end if
+            case_dir = orig_case_dir
         end if
 
         ! Write IB kinematic state for restart
