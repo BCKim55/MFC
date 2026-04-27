@@ -20,27 +20,75 @@ module m_lso_filter
 
     private
 
-    public :: s_initialize_lso_filter_module, s_apply_lso_filter, s_finalize_lso_filter_module
+    public :: s_initialize_lso_filter_module, s_apply_lso_filter, s_copy_and_apply_lso_filter, s_finalize_lso_filter_module, &
+        & q_filt_vf
 
     !> Temporary working buffer for one directional filter pass (interior cells only)
     real(wp), allocatable, dimension(:,:,:) :: lso_tmp
     $:GPU_DECLARE(create='[lso_tmp]')
 
+    !> Filtered copy of the conserved variables (only allocated when lso_filter_wrt = T)
+    type(scalar_field), allocatable :: q_filt_vf(:)
+
 contains
 
-    !> Allocate the temporary pass buffer
+    !> Allocate the temporary pass buffer and, when lso_filter_wrt is enabled, the filtered-copy array q_filt_vf with full
+    !! ghost-cell bounds.
     impure subroutine s_initialize_lso_filter_module()
+
+        integer :: i
 
         @:ALLOCATE(lso_tmp(0:m, 0:n, 0:p))
 
+        if (lso_filter_wrt) then
+            allocate (q_filt_vf(1:sys_size))
+            do i = 1, sys_size
+                @:ALLOCATE(q_filt_vf(i)%sf(idwbuff(1)%beg:idwbuff(1)%end, idwbuff(2)%beg:idwbuff(2)%end, &
+                           & idwbuff(3)%beg:idwbuff(3)%end))
+            end do
+        end if
+
     end subroutine s_initialize_lso_filter_module
 
-    !> Deallocate the temporary pass buffer
+    !> Deallocate the temporary pass buffer and, when allocated, q_filt_vf.
     impure subroutine s_finalize_lso_filter_module()
+
+        integer :: i
 
         @:DEALLOCATE(lso_tmp)
 
+        if (lso_filter_wrt) then
+            do i = 1, sys_size
+                @:DEALLOCATE(q_filt_vf(i)%sf)
+            end do
+            deallocate (q_filt_vf)
+        end if
+
     end subroutine s_finalize_lso_filter_module
+
+    !> Copy q_cons_vf into q_filt_vf (including ghost cells) on the device, then apply the LSO filter to q_filt_vf in place. Used
+    !! when lso_filter_wrt = T so the original conserved-variable array is left unmodified for the primary (unfiltered) output
+    !! write.
+    impure subroutine s_copy_and_apply_lso_filter(q_cons_vf)
+
+        type(scalar_field), intent(in) :: q_cons_vf(:)
+        integer                        :: i, j, k, l
+
+        $:GPU_PARALLEL_LOOP(collapse=4, private='[i, j, k, l]', copyin='[idwbuff]')
+        do i = 1, sys_size
+            do l = idwbuff(3)%beg, idwbuff(3)%end
+                do k = idwbuff(2)%beg, idwbuff(2)%end
+                    do j = idwbuff(1)%beg, idwbuff(1)%end
+                        q_filt_vf(i)%sf(j, k, l) = q_cons_vf(i)%sf(j, k, l)
+                    end do
+                end do
+            end do
+        end do
+        $:END_GPU_PARALLEL_LOOP()
+
+        call s_apply_lso_filter(q_filt_vf)
+
+    end subroutine s_copy_and_apply_lso_filter
 
     !> Apply the LSO variable-weight filter to all conserved variables.
     !!

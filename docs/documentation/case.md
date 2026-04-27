@@ -654,6 +654,15 @@ To restart the simulation from $k$-th time step, see @ref running "Restarting Ca
 | `cf_wrt`                | Logical | Write color function field |
 | `chem_wrt_T`            | Logical | Write temperature field for chemistry output |
 | `fft_wrt`               | Logical | Enable FFT output |
+| `lso_filter`            | Logical | Enable LSO variable-weight Gaussian filter applied to conserved variables at each data-save step |
+| `lso_filter_wrt`        | Logical | Write LSO-filtered fields to `<case_dir>_lso/`; unfiltered data written to the primary output path |
+| `filter_sigma`          | Real    | Target Gaussian filter standard deviation in physical units (same as domain coordinates) |
+| `lso_n_passes_x`        | Integer | Number of LSO filter passes in x-direction (auto-derived from particle diameter and grid spacing) |
+| `lso_n_passes_y`        | Integer | Number of LSO filter passes in y-direction (auto-derived from particle diameter and grid spacing) |
+| `lso_n_passes_z`        | Integer | Number of LSO filter passes in z-direction (auto-derived from particle diameter and grid spacing) |
+| `lso_a_x`               | Real    | LSO per-pass stencil coefficients in x (5 x lso_max_passes, auto-computed by toolchain) |
+| `lso_a_y`               | Real    | LSO per-pass stencil coefficients in y (5 x lso_max_passes, auto-computed by toolchain) |
+| `lso_a_z`               | Real    | LSO per-pass stencil coefficients in z (5 x lso_max_passes, auto-computed by toolchain) |
 | `sim_data`              | Logical | Write interface and energy data files (post_process) |
 | `integral_wrt`          | Logical | Write integral data |
 | `num_integrals`         | Integer | Number of integral regions |
