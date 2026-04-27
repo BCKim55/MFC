@@ -748,9 +748,8 @@ contains
         real(wp), intent(inout) :: start, finish, io_time_avg
         integer, intent(inout)  :: nt
         integer(kind=8)         :: i, j, k, l
-        integer                 :: stor
-        integer                 :: save_count
-        character(LEN=path_len) :: orig_case_dir
+        integer :: stor
+        integer :: save_count
 
         if (down_sample) then
             call s_populate_variables_buffers(bc_type, q_cons_ts(1)%vf)
@@ -836,22 +835,20 @@ contains
             call s_write_data_files(q_cons_ts(stor)%vf, q_T_sf, q_prim_vf, save_count, bc_type)
         end if
 
-        ! Write filtered fields to <case_dir>/lso when lso_filter_wrt is enabled. Bring filtered copy from device to host, then
-        ! redirect case_dir temporarily.
+        ! Write LSO-filtered fields with an "lso_" filename prefix (e.g. lso_q_cons_vf1.dat) into the same timestep directory.
         if (lso_filter .and. lso_filter_wrt) then
             do i = 1, sys_size
 #ifndef FRONTIER_UNIFIED
                 $:GPU_UPDATE(host='[q_filt_vf(i)%sf]')
 #endif
             end do
-            orig_case_dir = case_dir
-            case_dir = trim(case_dir) // '/lso'
+            lso_file_prefix = 'lso_'
             if (bubbles_lagrange) then
                 call s_write_data_files(q_filt_vf, q_T_sf, q_prim_vf, save_count, bc_type, q_beta(1))
             else
                 call s_write_data_files(q_filt_vf, q_T_sf, q_prim_vf, save_count, bc_type)
             end if
-            case_dir = orig_case_dir
+            lso_file_prefix = ''
         end if
 
         ! Write IB kinematic state for restart
