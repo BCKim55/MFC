@@ -90,67 +90,71 @@ contains
                 $:END_GPU_PARALLEL_LOOP()
             end do
 
-            ! y-direction passes
-            do ipass = 1, lso_n_passes_y
-                c0 = lso_a_y(1, ipass)
-                c1 = lso_a_y(2, ipass)
-                c2 = lso_a_y(3, ipass)
-                c3 = lso_a_y(4, ipass)
-                c4 = lso_a_y(5, ipass)
-                $:GPU_PARALLEL_LOOP(collapse=3, private='[j, k, l]')
-                do l = 0, p
-                    do k = 0, n
-                        do j = 0, m
-                            lso_tmp(j, k, l) = c0*real(q_cons_vf(i)%sf(j, k, l), wp) + c1*(real(q_cons_vf(i)%sf(j, k - 1, l), &
-                                    & wp) + real(q_cons_vf(i)%sf(j, k + 1, l), wp)) + c2*(real(q_cons_vf(i)%sf(j, k - 2, l), &
-                                    & wp) + real(q_cons_vf(i)%sf(j, k + 2, l), wp)) + c3*(real(q_cons_vf(i)%sf(j, k - 3, l), &
-                                    & wp) + real(q_cons_vf(i)%sf(j, k + 3, l), wp)) + c4*(real(q_cons_vf(i)%sf(j, k - 4, l), &
-                                    & wp) + real(q_cons_vf(i)%sf(j, k + 4, l), wp))
+            ! y-direction passes (2D/3D only: n > 0)
+            if (n > 0) then
+                do ipass = 1, lso_n_passes_y
+                    c0 = lso_a_y(1, ipass)
+                    c1 = lso_a_y(2, ipass)
+                    c2 = lso_a_y(3, ipass)
+                    c3 = lso_a_y(4, ipass)
+                    c4 = lso_a_y(5, ipass)
+                    $:GPU_PARALLEL_LOOP(collapse=3, private='[j, k, l]')
+                    do l = 0, p
+                        do k = 0, n
+                            do j = 0, m
+                                lso_tmp(j, k, l) = c0*real(q_cons_vf(i)%sf(j, k, l), wp) + c1*(real(q_cons_vf(i)%sf(j, k - 1, l), &
+                                        & wp) + real(q_cons_vf(i)%sf(j, k + 1, l), wp)) + c2*(real(q_cons_vf(i)%sf(j, k - 2, l), &
+                                        & wp) + real(q_cons_vf(i)%sf(j, k + 2, l), wp)) + c3*(real(q_cons_vf(i)%sf(j, k - 3, l), &
+                                        & wp) + real(q_cons_vf(i)%sf(j, k + 3, l), wp)) + c4*(real(q_cons_vf(i)%sf(j, k - 4, l), &
+                                        & wp) + real(q_cons_vf(i)%sf(j, k + 4, l), wp))
+                            end do
                         end do
                     end do
-                end do
-                $:END_GPU_PARALLEL_LOOP()
-                $:GPU_PARALLEL_LOOP(collapse=3, private='[j, k, l]')
-                do l = 0, p
-                    do k = 0, n
-                        do j = 0, m
-                            q_cons_vf(i)%sf(j, k, l) = real(lso_tmp(j, k, l), stp)
+                    $:END_GPU_PARALLEL_LOOP()
+                    $:GPU_PARALLEL_LOOP(collapse=3, private='[j, k, l]')
+                    do l = 0, p
+                        do k = 0, n
+                            do j = 0, m
+                                q_cons_vf(i)%sf(j, k, l) = real(lso_tmp(j, k, l), stp)
+                            end do
                         end do
                     end do
+                    $:END_GPU_PARALLEL_LOOP()
                 end do
-                $:END_GPU_PARALLEL_LOOP()
-            end do
+            end if
 
-            ! z-direction passes
-            do ipass = 1, lso_n_passes_z
-                c0 = lso_a_z(1, ipass)
-                c1 = lso_a_z(2, ipass)
-                c2 = lso_a_z(3, ipass)
-                c3 = lso_a_z(4, ipass)
-                c4 = lso_a_z(5, ipass)
-                $:GPU_PARALLEL_LOOP(collapse=3, private='[j, k, l]')
-                do l = 0, p
-                    do k = 0, n
-                        do j = 0, m
-                            lso_tmp(j, k, l) = c0*real(q_cons_vf(i)%sf(j, k, l), wp) + c1*(real(q_cons_vf(i)%sf(j, k, l - 1), &
-                                    & wp) + real(q_cons_vf(i)%sf(j, k, l + 1), wp)) + c2*(real(q_cons_vf(i)%sf(j, k, l - 2), &
-                                    & wp) + real(q_cons_vf(i)%sf(j, k, l + 2), wp)) + c3*(real(q_cons_vf(i)%sf(j, k, l - 3), &
-                                    & wp) + real(q_cons_vf(i)%sf(j, k, l + 3), wp)) + c4*(real(q_cons_vf(i)%sf(j, k, l - 4), &
-                                    & wp) + real(q_cons_vf(i)%sf(j, k, l + 4), wp))
+            ! z-direction passes (3D only: p > 0)
+            if (p > 0) then
+                do ipass = 1, lso_n_passes_z
+                    c0 = lso_a_z(1, ipass)
+                    c1 = lso_a_z(2, ipass)
+                    c2 = lso_a_z(3, ipass)
+                    c3 = lso_a_z(4, ipass)
+                    c4 = lso_a_z(5, ipass)
+                    $:GPU_PARALLEL_LOOP(collapse=3, private='[j, k, l]')
+                    do l = 0, p
+                        do k = 0, n
+                            do j = 0, m
+                                lso_tmp(j, k, l) = c0*real(q_cons_vf(i)%sf(j, k, l), wp) + c1*(real(q_cons_vf(i)%sf(j, k, l - 1), &
+                                        & wp) + real(q_cons_vf(i)%sf(j, k, l + 1), wp)) + c2*(real(q_cons_vf(i)%sf(j, k, l - 2), &
+                                        & wp) + real(q_cons_vf(i)%sf(j, k, l + 2), wp)) + c3*(real(q_cons_vf(i)%sf(j, k, l - 3), &
+                                        & wp) + real(q_cons_vf(i)%sf(j, k, l + 3), wp)) + c4*(real(q_cons_vf(i)%sf(j, k, l - 4), &
+                                        & wp) + real(q_cons_vf(i)%sf(j, k, l + 4), wp))
+                            end do
                         end do
                     end do
-                end do
-                $:END_GPU_PARALLEL_LOOP()
-                $:GPU_PARALLEL_LOOP(collapse=3, private='[j, k, l]')
-                do l = 0, p
-                    do k = 0, n
-                        do j = 0, m
-                            q_cons_vf(i)%sf(j, k, l) = real(lso_tmp(j, k, l), stp)
+                    $:END_GPU_PARALLEL_LOOP()
+                    $:GPU_PARALLEL_LOOP(collapse=3, private='[j, k, l]')
+                    do l = 0, p
+                        do k = 0, n
+                            do j = 0, m
+                                q_cons_vf(i)%sf(j, k, l) = real(lso_tmp(j, k, l), stp)
+                            end do
                         end do
                     end do
+                    $:END_GPU_PARALLEL_LOOP()
                 end do
-                $:END_GPU_PARALLEL_LOOP()
-            end do
+            end if
         end do
 
     end subroutine s_apply_lso_filter
