@@ -195,6 +195,7 @@ def compute_lso_params(
     Args:
         d_p:          Particle diameter (physical units, same as domain coords).
         dx, dy, dz:   Grid spacing in each direction (physical units).
+                      Pass dy = 0.0 for 1D simulations (y/z-filter skipped).
                       Pass dz = 0.0 for 2D simulations (z-filter is skipped).
         filter_sigma: Target Gaussian filter standard deviation (physical units).
         conv_tol:     Frequency-domain L2 convergence tolerance.
@@ -205,7 +206,9 @@ def compute_lso_params(
             lso_n_passes_x/y/z  (int)
             lso_a_x/y/z         (list of n_passes tuples of 5 floats)
     """
-    directions = [("x", dx), ("y", dy)]
+    directions = [("x", dx)]
+    if dy > 0.0:
+        directions.append(("y", dy))
     if dz > 0.0:
         directions.append(("z", dz))
 
@@ -218,7 +221,12 @@ def compute_lso_params(
         n_res = d_p / d
         print(f"  [LSO] {tag}-dir: N_res={n_res:.2f}, sigma_target={sigma_target:.2f} cells, N_passes={n_passes}, L2_err={err:.2e}")
 
-    # For 2D, z-direction uses zero passes and dummy weights
+    # For 1D, y-direction uses zero passes and dummy weights
+    if dy <= 0.0:
+        result["lso_n_passes_y"] = 0
+        result["lso_a_y"] = []
+
+    # For 1D/2D, z-direction uses zero passes and dummy weights
     if dz <= 0.0:
         result["lso_n_passes_z"] = 0
         result["lso_a_z"] = []
