@@ -296,27 +296,30 @@ contains
         write (t_step_dir, '(A,I0,A,I0)') trim(case_dir) // '/p_all'
         write (t_step_dir, '(a,i0,a,i0)') trim(case_dir) // '/p_all/p', proc_rank, '/', t_step
 
-        file_path = trim(t_step_dir) // '/.'
-        call my_inquire(file_path, file_exist)
-        if (file_exist) call s_delete_directory(trim(t_step_dir))
-        call s_create_directory(trim(t_step_dir))
+        ! When writing the primary (unfiltered) output: delete any stale directory and recreate it cleanly. When writing LSO-filtered
+        ! output (lso_file_prefix /= ''), the directory was already created by the primary write and must not be deleted — doing so
+        ! would erase the unfiltered files. Grid coordinate files (x_cb.dat, etc.) are unchanged by filtering, so they are only
+        ! written once (on the primary pass).
+        if (lso_file_prefix == '') then
+            file_path = trim(t_step_dir) // '/.'
+            call my_inquire(file_path, file_exist)
+            if (file_exist) call s_delete_directory(trim(t_step_dir))
+            call s_create_directory(trim(t_step_dir))
 
-        file_path = trim(t_step_dir) // '/x_cb.dat'
-
-        open (2, FILE=trim(file_path), form='unformatted', STATUS='new')
-        write (2) x_cb(-1:m); close (2)
-
-        if (n > 0) then
-            file_path = trim(t_step_dir) // '/y_cb.dat'
-
+            file_path = trim(t_step_dir) // '/x_cb.dat'
             open (2, FILE=trim(file_path), form='unformatted', STATUS='new')
-            write (2) y_cb(-1:n); close (2)
+            write (2) x_cb(-1:m); close (2)
 
-            if (p > 0) then
-                file_path = trim(t_step_dir) // '/z_cb.dat'
-
+            if (n > 0) then
+                file_path = trim(t_step_dir) // '/y_cb.dat'
                 open (2, FILE=trim(file_path), form='unformatted', STATUS='new')
-                write (2) z_cb(-1:p); close (2)
+                write (2) y_cb(-1:n); close (2)
+
+                if (p > 0) then
+                    file_path = trim(t_step_dir) // '/z_cb.dat'
+                    open (2, FILE=trim(file_path), form='unformatted', STATUS='new')
+                    write (2) z_cb(-1:p); close (2)
+                end if
             end if
         end if
 
@@ -338,7 +341,8 @@ contains
             write (2) beta%sf(0:m,0:n,0:p); close (2)
         end if
 
-        if (qbmm .and. .not. polytropic) then
+        ! QBMM pb/mv fields are not filtered by LSO; write only on the primary pass.
+        if ((qbmm .and. .not. polytropic) .and. lso_file_prefix == '') then
             do i = 1, nb
                 do r = 1, nnode
                     write (file_path, '(A,I0,A)') trim(t_step_dir) // '/pb', sys_size + (i - 1)*nnode + r, '.dat'
@@ -360,8 +364,8 @@ contains
             end do
         end if
 
-        ! Writing the IB markers
-        if (ib) then
+        ! Writing the IB markers — only on the primary (unfiltered) pass; IB state is unchanged by the LSO filter.
+        if (ib .and. lso_file_prefix == '') then
             call s_write_serial_ib_data(t_step)
         end if
 
@@ -375,6 +379,10 @@ contains
         else
             FMT = "(2F40.14)"
         end if
+
+        ! D/ diagnostic text files (prim/cons/probe outputs) are only written on the primary pass; the LSO-filtered pass writes only
+        ! the prefixed q_cons_vf binary files.
+        if (lso_file_prefix /= '') return
 
         write (t_step_dir, '(A,I0,A,I0)') trim(case_dir) // '/D'
         file_path = trim(t_step_dir) // '/.'
@@ -824,7 +832,8 @@ contains
 
             call MPI_FILE_CLOSE(ifile, ierr)
 
-            if (ib) then
+            ! IB marker data is not filtered; write only on the primary (unfiltered) pass.
+            if (ib .and. lso_file_prefix == '') then
                 call s_write_parallel_ib_data(t_step)
             end if
         end if
