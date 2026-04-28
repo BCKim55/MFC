@@ -41,10 +41,13 @@ contains
         @:ALLOCATE(lso_tmp(0:m, 0:n, 0:p))
 
         if (lso_filter_wrt) then
-            allocate (q_filt_vf(1:sys_size))
+            @:ALLOCATE(q_filt_vf(1:sys_size))
             do i = 1, sys_size
                 @:ALLOCATE(q_filt_vf(i)%sf(idwbuff(1)%beg:idwbuff(1)%end, idwbuff(2)%beg:idwbuff(2)%end, &
                            & idwbuff(3)%beg:idwbuff(3)%end))
+            end do
+            do i = 1, sys_size
+                @:ACC_SETUP_SFs(q_filt_vf(i))
             end do
         end if
 
@@ -61,7 +64,7 @@ contains
             do i = 1, sys_size
                 @:DEALLOCATE(q_filt_vf(i)%sf)
             end do
-            deallocate (q_filt_vf)
+            @:DEALLOCATE(q_filt_vf)
         end if
 
     end subroutine s_finalize_lso_filter_module
@@ -74,8 +77,8 @@ contains
         type(scalar_field), intent(in) :: q_cons_vf(:)
         integer                        :: i, j, k, l
 
-        $:GPU_PARALLEL_LOOP(collapse=4, private='[i, j, k, l]', copyin='[idwbuff]')
         do i = 1, sys_size
+            $:GPU_PARALLEL_LOOP(collapse=3, private='[j, k, l]')
             do l = idwbuff(3)%beg, idwbuff(3)%end
                 do k = idwbuff(2)%beg, idwbuff(2)%end
                     do j = idwbuff(1)%beg, idwbuff(1)%end
@@ -83,8 +86,8 @@ contains
                     end do
                 end do
             end do
+            $:END_GPU_PARALLEL_LOOP()
         end do
-        $:END_GPU_PARALLEL_LOOP()
 
         call s_apply_lso_filter(q_filt_vf)
 

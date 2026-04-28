@@ -158,7 +158,11 @@ contains
         end if
 
         if (format == 1) then
-            dbdir = trim(case_dir) // '/silo_hdf5'
+            if (lso_filter_wrt) then
+                dbdir = trim(case_dir) // '/silo_hdf5_lso'
+            else
+                dbdir = trim(case_dir) // '/silo_hdf5'
+            end if
 
             write (proc_rank_dir, '(A,I0)') '/p', proc_rank
 

@@ -748,8 +748,8 @@ contains
         real(wp), intent(inout) :: start, finish, io_time_avg
         integer, intent(inout)  :: nt
         integer(kind=8)         :: i, j, k, l
-        integer :: stor
-        integer :: save_count
+        integer                 :: stor
+        integer                 :: save_count
 
         if (down_sample) then
             call s_populate_variables_buffers(bc_type, q_cons_ts(1)%vf)
@@ -807,8 +807,10 @@ contains
         if (lso_filter) then
             if (lso_filter_wrt) then
                 call s_copy_and_apply_lso_filter(q_cons_ts(stor)%vf)
+                $:GPU_WAIT()
             else
                 call s_apply_lso_filter(q_cons_ts(stor)%vf)
+                $:GPU_WAIT()
                 do i = 1, sys_size
 #ifndef FRONTIER_UNIFIED
                     $:GPU_UPDATE(host='[q_cons_ts(stor)%vf(i)%sf]')
@@ -834,7 +836,6 @@ contains
         else
             call s_write_data_files(q_cons_ts(stor)%vf, q_T_sf, q_prim_vf, save_count, bc_type)
         end if
-
         ! Write LSO-filtered fields with an "lso_" filename prefix (e.g. lso_q_cons_vf1.dat) into the same timestep directory.
         if (lso_filter .and. lso_filter_wrt) then
             do i = 1, sys_size
@@ -1125,6 +1126,11 @@ contains
         #:if not MFC_CASE_OPTIMIZATION
             $:GPU_UPDATE(device='[igr, nb, igr_order]')
         #:endif
+
+        if (lso_filter) then
+            $:GPU_UPDATE(device='[lso_filter, lso_n_passes_x, lso_n_passes_y, lso_n_passes_z]')
+            $:GPU_UPDATE(device='[lso_a_x, lso_a_y, lso_a_z]')
+        end if
         #:if USING_AMD
             block
                 use m_thermochem, only: molecular_weights

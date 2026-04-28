@@ -265,7 +265,7 @@ def lso_namelist_lines(lso_params: dict) -> str:
                     if i_pass < len(coeffs):
                         flat.append(f"{coeffs[i_pass][j_coeff]:.17e}")
                     else:
-                        flat.append("0.0d0")
+                        flat.append("0.0e0")
             lines.append(f"lso_a_{tag} = {' '.join(flat)}")
 
     return "\n".join(lines) + "\n"

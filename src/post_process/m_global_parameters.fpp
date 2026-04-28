@@ -203,6 +203,7 @@ module m_global_parameters
     logical                            :: cf_wrt
     logical                            :: ib
     logical                            :: ib_state_wrt
+    logical                            :: lso_filter_wrt  !< Read LSO-filtered restart data (lustre_lso_*.dat) and write to silo_hdf5_lso/
     logical                            :: chem_wrt_Y(1:num_species)
     logical                            :: chem_wrt_T
     logical                            :: lag_header
@@ -415,6 +416,7 @@ contains
         cf_wrt = .false.
         ib = .false.
         ib_state_wrt = .false.
+        lso_filter_wrt = .false.
         lag_txt_wrt = .false.
         lag_header = .true.
         lag_db_wrt = .false.
