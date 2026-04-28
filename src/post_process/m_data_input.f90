@@ -374,15 +374,26 @@ contains
         integer, dimension(MPI_STATUS_SIZE)          :: status
         integer(KIND=MPI_OFFSET_KIND)                :: disp, var_MOK
         character(LEN=path_len + 2*name_len)         :: file_loc
+        character(LEN=path_len + 2*name_len)         :: file_loc_base
         logical                                      :: file_exist
         character(len=10)                            :: t_step_string
         integer                                      :: i
 
         if (file_per_process) then
             call s_int_to_str(t_step, t_step_string)
-            write (file_loc, '(I0,A1,I7.7,A)') t_step, '_', proc_rank, '.dat'
-            file_loc = trim(case_dir) // '/restart_data/lustre_' // trim(t_step_string) // trim(mpiiofs) // trim(file_loc)
-            inquire (FILE=trim(file_loc), EXIST=file_exist)
+            write (file_loc_base, '(I0,A1,I7.7,A)') t_step, '_', proc_rank, '.dat'
+            if (lso_filter_wrt) then
+                file_loc = trim(case_dir) // '/restart_data/lustre_' // trim(t_step_string) // trim(mpiiofs) // 'lso_' // trim(file_loc_base)
+                inquire (FILE=trim(file_loc), EXIST=file_exist)
+                if (.not. file_exist) then
+                    ! LSO file absent (e.g. initial condition from pre_process): fall back to unfiltered
+                    file_loc = trim(case_dir) // '/restart_data/lustre_' // trim(t_step_string) // trim(mpiiofs) // trim(file_loc_base)
+                    inquire (FILE=trim(file_loc), EXIST=file_exist)
+                end if
+            else
+                file_loc = trim(case_dir) // '/restart_data/lustre_' // trim(t_step_string) // trim(mpiiofs) // trim(file_loc_base)
+                inquire (FILE=trim(file_loc), EXIST=file_exist)
+            end if
 
             if (file_exist) then
                 call MPI_FILE_OPEN(MPI_COMM_SELF, file_loc, MPI_MODE_RDONLY, mpi_info_int, ifile, ierr)
@@ -437,9 +448,19 @@ contains
                 call s_mpi_abort('File ' // trim(file_loc) // ' is missing. Exiting.')
             end if
         else
-            write (file_loc, '(I0,A)') t_step, '.dat'
-            file_loc = trim(case_dir) // '/restart_data' // trim(mpiiofs) // trim(file_loc)
-            inquire (FILE=trim(file_loc), EXIST=file_exist)
+            write (file_loc_base, '(I0,A)') t_step, '.dat'
+            if (lso_filter_wrt) then
+                file_loc = trim(case_dir) // '/restart_data' // trim(mpiiofs) // 'lso_' // trim(file_loc_base)
+                inquire (FILE=trim(file_loc), EXIST=file_exist)
+                if (.not. file_exist) then
+                    ! LSO file absent (e.g. initial condition from pre_process): fall back to unfiltered
+                    file_loc = trim(case_dir) // '/restart_data' // trim(mpiiofs) // trim(file_loc_base)
+                    inquire (FILE=trim(file_loc), EXIST=file_exist)
+                end if
+            else
+                file_loc = trim(case_dir) // '/restart_data' // trim(mpiiofs) // trim(file_loc_base)
+                inquire (FILE=trim(file_loc), EXIST=file_exist)
+            end if
 
             if (file_exist) then
                 call MPI_FILE_OPEN(MPI_COMM_WORLD, file_loc, MPI_MODE_RDONLY, mpi_info_int, ifile, ierr)

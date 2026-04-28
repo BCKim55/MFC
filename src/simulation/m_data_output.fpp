@@ -296,10 +296,10 @@ contains
         write (t_step_dir, '(A,I0,A,I0)') trim(case_dir) // '/p_all'
         write (t_step_dir, '(a,i0,a,i0)') trim(case_dir) // '/p_all/p', proc_rank, '/', t_step
 
-        ! When writing the primary (unfiltered) output: delete any stale directory and recreate it cleanly. When writing LSO-filtered
-        ! output (lso_file_prefix /= ''), the directory was already created by the primary write and must not be deleted — doing so
-        ! would erase the unfiltered files. Grid coordinate files (x_cb.dat, etc.) are unchanged by filtering, so they are only
-        ! written once (on the primary pass).
+        ! When writing the primary (unfiltered) output: delete any stale directory and recreate it cleanly. When writing
+        ! LSO-filtered output (lso_file_prefix /= ''), the directory was already created by the primary write and must not be
+        ! deleted - doing so would erase the unfiltered files. Grid coordinate files (x_cb.dat, etc.) are unchanged by filtering, so
+        ! they are only written once (on the primary pass).
         if (lso_file_prefix == '') then
             file_path = trim(t_step_dir) // '/.'
             call my_inquire(file_path, file_exist)
@@ -364,7 +364,7 @@ contains
             end do
         end if
 
-        ! Writing the IB markers — only on the primary (unfiltered) pass; IB state is unchanged by the LSO filter.
+        ! Writing the IB markers - only on the primary (unfiltered) pass; IB state is unchanged by the LSO filter.
         if (ib .and. lso_file_prefix == '') then
             call s_write_serial_ib_data(t_step)
         end if
@@ -707,7 +707,8 @@ contains
             call s_initialize_mpi_data(q_cons_vf)
 
             write (file_loc, '(I0,A,i7.7,A)') t_step, '_', proc_rank, '.dat'
-            file_loc = trim(case_dir) // '/restart_data/lustre_' // trim(t_step_string) // trim(mpiiofs) // trim(lso_file_prefix) // trim(file_loc)
+            file_loc = trim(case_dir) // '/restart_data/lustre_' // trim(t_step_string) // trim(mpiiofs) // trim(lso_file_prefix) &
+                            & // trim(file_loc)
             inquire (FILE=trim(file_loc), EXIST=file_exist)
             if (file_exist .and. proc_rank == 0) then
                 call MPI_FILE_DELETE(file_loc, mpi_info_int, ierr)
@@ -765,7 +766,9 @@ contains
 
             call MPI_FILE_CLOSE(ifile, ierr)
         else
-            if (ib) then
+            ! For the LSO-filtered pass (lso_file_prefix /= ''), IB marker data is not written, so skip the ib_markers
+            ! setup to avoid re-committing already-committed MPI type handles from the primary pass.
+            if (ib .and. lso_file_prefix == '') then
                 call s_initialize_mpi_data(q_cons_vf, ib_markers)
             else if (present(beta)) then
                 call s_initialize_mpi_data(q_cons_vf, beta=beta)
