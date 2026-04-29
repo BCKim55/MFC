@@ -237,6 +237,10 @@ module m_global_parameters
     integer  :: precision         !< Precision of output files
     logical  :: down_sample       !< down sample the output files
     $:GPU_DECLARE(create='[down_sample]')
+    integer  :: lso_down_sample_factor  !< Stride factor for LSO-filtered output grid coarsening (1 = no coarsening)
+    !> Coarsened-grid dimensions for LSO downsampled output (valid when lso_filter_wrt .and. lso_down_sample_factor > 1)
+    integer  :: m_lso_ds, n_lso_ds, p_lso_ds
+    integer  :: m_glb_lso_ds, n_glb_lso_ds, p_glb_lso_ds
 
     integer, allocatable, dimension(:)            :: proc_coords  !< Processor coordinates in MPI_CART_COMM
     integer, allocatable, dimension(:)            :: start_idx    !< Starting cell-center index of local processor in global grid
@@ -660,6 +664,7 @@ contains
         lso_filter = .false.
         lso_filter_wrt = .false.
         filter_sigma = dflt_real
+        lso_down_sample_factor = 1
         lso_n_passes_x = 0
         lso_n_passes_y = 0
         lso_n_passes_z = 0
