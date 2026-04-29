@@ -656,7 +656,7 @@ contains
     !! Points MPI_IO_DATA%var(i) at q_filt_ds_vf(i)%sf(0:m_lso_ds, 0:n_lso_ds, 0:p_lso_ds) and creates
     !! subarray types with the coarsened global/local dimensions so that each MPI rank writes its
     !! correct portion of the coarser global file. The coarsened starting index is start_idx(d)/factor.
-    private subroutine s_initialize_mpi_data_lso_ds(q_filt_ds_vf)
+    impure subroutine s_initialize_mpi_data_lso_ds(q_filt_ds_vf)
 
         type(scalar_field), dimension(sys_size), intent(in) :: q_filt_ds_vf
 #ifdef MFC_MPI
