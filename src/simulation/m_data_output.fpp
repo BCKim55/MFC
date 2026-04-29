@@ -766,8 +766,8 @@ contains
 
             call MPI_FILE_CLOSE(ifile, ierr)
         else
-            ! For the LSO-filtered pass (lso_file_prefix /= ''), IB marker data is not written, so skip the ib_markers
-            ! setup to avoid re-committing already-committed MPI type handles from the primary pass.
+            ! For the LSO-filtered pass (lso_file_prefix /= ''), IB marker data is not written, so skip the ib_markers setup to
+            ! avoid re-committing already-committed MPI type handles from the primary pass.
             if (ib .and. lso_file_prefix == '') then
                 call s_initialize_mpi_data(q_cons_vf, ib_markers)
             else if (present(beta)) then

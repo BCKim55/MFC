@@ -70,8 +70,7 @@ contains
             & bubbles_lagrange, sim_data, hyperelasticity, Bx0, relativity, cont_damage, hyper_cleaning, num_bc_patches, igr, &
             & igr_order, down_sample, recon_type, muscl_order, lag_header, lag_txt_wrt, lag_db_wrt, lag_id_wrt, lag_pos_wrt, &
             & lag_pos_prev_wrt, lag_vel_wrt, lag_rad_wrt, lag_rvel_wrt, lag_r0_wrt, lag_rmax_wrt, lag_rmin_wrt, lag_dphidt_wrt, &
-            & lag_pres_wrt, lag_mv_wrt, lag_mg_wrt, lag_betaT_wrt, lag_betaC_wrt, alpha_rho_e_wrt, ib_state_wrt, &
-            & lso_filter_wrt
+            & lag_pres_wrt, lag_mv_wrt, lag_mg_wrt, lag_betaT_wrt, lag_betaC_wrt, alpha_rho_e_wrt, ib_state_wrt, lso_filter_wrt
 
         file_loc = 'post_process.inp'
         inquire (FILE=trim(file_loc), EXIST=file_check)
@@ -176,6 +175,27 @@ contains
         call s_convert_conservative_to_primitive_variables(q_cons_vf, q_T_sf, q_prim_vf, idwbuff)
 
     end subroutine s_perform_time_step
+
+    !> Reload conservative variable data for a time step and reconvert to primitive variables, WITHOUT printing the progress bar.
+    !! Used for the LSO two-pass write: after the normal filtered pass the caller toggles lso_filter_wrt=.false., calls
+    !! s_reload_data to read the unfiltered conservative data, then writes a second Silo database to silo_hdf5/. Grid file reads are
+    !! skipped automatically (grid_loaded flag in m_data_input).
+    impure subroutine s_reload_data(t_step)
+
+        integer, intent(in) :: t_step
+
+        call s_read_data_files(t_step)
+
+        if (chemistry) call s_compute_q_T_sf(q_T_sf, q_cons_vf, idwbuff)
+
+        if (buff_size > 0) then
+            call s_populate_grid_variables_buffers()
+            call s_populate_variables_buffers(bc_type, q_cons_vf, q_T_sf=q_T_sf)
+        end if
+
+        call s_convert_conservative_to_primitive_variables(q_cons_vf, q_T_sf, q_prim_vf, idwbuff)
+
+    end subroutine s_reload_data
 
     !> Derive requested flow quantities from primitive variables and write them to the formatted database files.
     impure subroutine s_save_data(t_step, varname, pres, c, H)

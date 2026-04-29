@@ -178,51 +178,52 @@ module m_global_parameters
     !! Schlieren function.
     !> @{
     logical, dimension(num_fluids_max) :: alpha_rho_wrt
-    logical                            :: rho_wrt
-    logical, dimension(3)              :: mom_wrt
-    logical, dimension(3)              :: vel_wrt
-    integer                            :: flux_lim
-    logical, dimension(3)              :: flux_wrt
-    logical                            :: E_wrt
+    logical :: rho_wrt
+    logical, dimension(3) :: mom_wrt
+    logical, dimension(3) :: vel_wrt
+    integer :: flux_lim
+    logical, dimension(3) :: flux_wrt
+    logical :: E_wrt
     logical, dimension(num_fluids_max) :: alpha_rho_e_wrt
     logical                            :: fft_wrt
+    logical                            :: dummy   !< AMDFlang workaround for case-optimization + GPU-kernel bug
     logical                            :: pres_wrt
     logical, dimension(num_fluids_max) :: alpha_wrt
-    logical                            :: gamma_wrt
-    logical                            :: heat_ratio_wrt
-    logical                            :: pi_inf_wrt
-    logical                            :: pres_inf_wrt
-    logical                            :: prim_vars_wrt
-    logical                            :: cons_vars_wrt
-    logical                            :: c_wrt
-    logical, dimension(3)              :: omega_wrt
-    logical                            :: qm_wrt
-    logical                            :: liutex_wrt
-    logical                            :: schlieren_wrt
-    logical                            :: cf_wrt
-    logical                            :: ib
-    logical                            :: ib_state_wrt
-    logical                            :: lso_filter_wrt  !< Read LSO-filtered restart data (lustre_lso_*.dat) and write to silo_hdf5_lso/
-    logical                            :: chem_wrt_Y(1:num_species)
-    logical                            :: chem_wrt_T
-    logical                            :: lag_header
-    logical                            :: lag_txt_wrt
-    logical                            :: lag_db_wrt
-    logical                            :: lag_id_wrt
-    logical                            :: lag_pos_wrt
-    logical                            :: lag_pos_prev_wrt
-    logical                            :: lag_vel_wrt
-    logical                            :: lag_rad_wrt
-    logical                            :: lag_rvel_wrt
-    logical                            :: lag_r0_wrt
-    logical                            :: lag_rmax_wrt
-    logical                            :: lag_rmin_wrt
-    logical                            :: lag_dphidt_wrt
-    logical                            :: lag_pres_wrt
-    logical                            :: lag_mv_wrt
-    logical                            :: lag_mg_wrt
-    logical                            :: lag_betaT_wrt
-    logical                            :: lag_betaC_wrt
+    logical :: gamma_wrt
+    logical :: heat_ratio_wrt
+    logical :: pi_inf_wrt
+    logical :: pres_inf_wrt
+    logical :: prim_vars_wrt
+    logical :: cons_vars_wrt
+    logical :: c_wrt
+    logical, dimension(3) :: omega_wrt
+    logical :: qm_wrt
+    logical :: liutex_wrt
+    logical :: schlieren_wrt
+    logical :: cf_wrt
+    logical :: ib
+    logical :: ib_state_wrt
+    logical :: lso_filter_wrt  !< Read LSO-filtered restart data (lustre_lso_*.dat) and write to silo_hdf5_lso/
+    logical :: chem_wrt_Y(1:num_species)
+    logical :: chem_wrt_T
+    logical :: lag_header
+    logical :: lag_txt_wrt
+    logical :: lag_db_wrt
+    logical :: lag_id_wrt
+    logical :: lag_pos_wrt
+    logical :: lag_pos_prev_wrt
+    logical :: lag_vel_wrt
+    logical :: lag_rad_wrt
+    logical :: lag_rvel_wrt
+    logical :: lag_r0_wrt
+    logical :: lag_rmax_wrt
+    logical :: lag_rmin_wrt
+    logical :: lag_dphidt_wrt
+    logical :: lag_pres_wrt
+    logical :: lag_mv_wrt
+    logical :: lag_mg_wrt
+    logical :: lag_betaT_wrt
+    logical :: lag_betaC_wrt
     !> @}
 
     real(wp), dimension(num_fluids_max) :: schlieren_alpha  !< Per-fluid Schlieren intensity amplitude coefficients
