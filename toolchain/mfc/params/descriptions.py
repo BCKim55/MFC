@@ -265,6 +265,7 @@ DESCRIPTIONS = {
     "lso_a_x": "LSO per-pass 9-point stencil coefficients in x (5 x lso_max_passes, column-major, auto-computed)",
     "lso_a_y": "LSO per-pass 9-point stencil coefficients in y (5 x lso_max_passes, column-major, auto-computed)",
     "lso_a_z": "LSO per-pass 9-point stencil coefficients in z (5 x lso_max_passes, column-major, auto-computed)",
+    "lso_down_sample_factor": "Stride factor for coarsening the LSO-filtered output grid (1 = no coarsening). Each direction is sampled every N cells, reducing storage by N^dims.",
 }
 
 # Patterns for auto-generating descriptions of indexed parameters

@@ -203,7 +203,7 @@ module m_global_parameters
     logical :: cf_wrt
     logical :: ib
     logical :: ib_state_wrt
-    logical :: lso_filter_wrt  !< Read LSO-filtered restart data (lustre_lso_*.dat) and write to silo_hdf5_lso/
+    logical :: lso_filter_wrt          !< Read LSO-filtered restart data (lustre_lso_*.dat) and write to silo_hdf5_lso/
     integer :: lso_down_sample_factor  !< Stride factor used when writing LSO-filtered output (1 = no coarsening)
     logical :: chem_wrt_Y(1:num_species)
     logical :: chem_wrt_T

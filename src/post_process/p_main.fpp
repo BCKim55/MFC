@@ -47,10 +47,9 @@ program p_main
 
         ! Secondary pass: when lso_filter_wrt=T, also write the unfiltered data to silo_hdf5/. Grid files are NOT re-opened
         ! (grid_loaded flag skips them), avoiding a known MPI-IO hang from re-opening the same file with
-        ! MPI_FILE_OPEN(MPI_COMM_WORLD, fp) a second time.
-        ! NOTE: When lso_down_sample_factor > 1 the LSO files are on a coarser grid than the unfiltered data. The secondary pass
-        ! cannot switch grid dimensions at runtime, so it is skipped. Run post_process again with lso_filter_wrt=.false. to
-        ! process the full-resolution unfiltered data.
+        ! MPI_FILE_OPEN(MPI_COMM_WORLD, fp) a second time. NOTE: When lso_down_sample_factor > 1 the LSO files are on a coarser grid
+        ! than the unfiltered data. The secondary pass cannot switch grid dimensions at runtime, so it is skipped. Run post_process
+        ! again with lso_filter_wrt=.false. to process the full-resolution unfiltered data.
         if (lso_filter_wrt .and. lso_down_sample_factor <= 1) then
             lso_filter_wrt = .false.
             call s_reload_data(t_step)

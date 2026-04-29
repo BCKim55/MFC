@@ -132,8 +132,9 @@ contains
         integer                           :: i, ipass, j, k, l
         real(wp)                          :: c0, c1, c2, c3, c4
 
-        ! x-direction passes: outer loop over passes so all variables are updated before the
-        ! inter-pass MPI exchange, which refreshes x-direction ghost cells at rank boundaries.
+        ! x-direction passes: outer loop over passes so all variables are updated before the inter-pass MPI exchange, which
+        ! refreshes x-direction ghost cells at rank boundaries.
+
         do ipass = 1, lso_n_passes_x
             c0 = lso_a_x(1, ipass)
             c1 = lso_a_x(2, ipass)
@@ -167,9 +168,8 @@ contains
             if (ipass < lso_n_passes_x) call s_lso_filter_ghost_refresh(q_cons_vf, 1)
         end do
 
-        ! y-direction passes (2D/3D only: n > 0)
-        ! Exchange y ghost cells before starting y passes so that the ghost cells of each rank
-        ! reflect the x-filtered interior values of its y-neighbours.
+        ! y-direction passes (2D/3D only: n > 0) Exchange y ghost cells before starting y passes so that the ghost cells of each
+        ! rank reflect the x-filtered interior values of its y-neighbours.
         if (n > 0) then
             call s_lso_filter_ghost_refresh(q_cons_vf, 2)
             do ipass = 1, lso_n_passes_y
@@ -247,9 +247,9 @@ contains
 
     !> Stride-sample (decimate) q_src_vf into q_dst_vf with the given integer factor in all active directions.
     !!
-    !! The filtered source data is already band-limited by the LSO filter, so a simple stride pick (every Nth
-    !! cell, starting at index 0) is a valid decimation with no additional anti-aliasing needed. The destination
-    !! array must be allocated to (0:m_lso_ds, 0:n_lso_ds, 0:p_lso_ds) by the caller.
+    !! The filtered source data is already band-limited by the LSO filter, so a simple stride pick (every Nth cell, starting at
+    !! index 0) is a valid decimation with no additional anti-aliasing needed. The destination array must be allocated to
+    !! (0:m_lso_ds, 0:n_lso_ds, 0:p_lso_ds) by the caller.
     !!
     !! @param q_src_vf   Source conserved-variable array (full grid, interior cells 0:m, 0:n, 0:p on host).
     !! @param q_dst_vf   Destination array (coarsened, 0:m_lso_ds, etc.).
@@ -277,15 +277,13 @@ contains
     !!
     !! Handles two kinds of ghost cell sources:
     !!
-    !! - MPI boundaries (bc >= 0): issues a sendrecv with the neighbouring rank so the ghost
-    !!   cells reflect the latest filtered interior values of that rank.
+    !! - MPI boundaries (bc >= 0): issues a sendrecv with the neighbouring rank so the ghost cells reflect the latest filtered
+    !! interior values of that rank.
     !!
-    !! - Physical boundaries (bc < 0): re-applies the boundary ghost cell rule using the
-    !!   current (filtered) state of the interior edge cells.  Currently implemented for
-    !!   BC_GHOST_EXTRAP (-3), which is a zeroth-order extrapolation (constant copy of the
-    !!   interior edge cell).  Other physical BCs (REFLECTIVE, PERIODIC single-rank, wall)
-    !!   are left unchanged here; they use the pre-filter ghost values for all passes, which
-    !!   is a small approximation acceptable for a save-time output filter.
+    !! - Physical boundaries (bc < 0): re-applies the boundary ghost cell rule using the current (filtered) state of the interior
+    !! edge cells. Currently implemented for BC_GHOST_EXTRAP (-3), which is a zeroth-order extrapolation (constant copy of the
+    !! interior edge cell). Other physical BCs (REFLECTIVE, PERIODIC single-rank, wall) are left unchanged here; they use the
+    !! pre-filter ghost values for all passes, which is a small approximation acceptable for a save-time output filter.
     !!
     !! @param q_cons_vf  Conserved-variable array whose ghost cells are refreshed in-place.
     !! @param mpi_dir    Spatial direction: 1 = x, 2 = y, 3 = z.
@@ -313,9 +311,8 @@ contains
         if (end_bc >= 0) call s_mpi_sendrecv_variables_buffers(q_cons_vf, mpi_dir, 1, sys_size)
 #endif
 
-        ! Physical boundaries: BC_GHOST_EXTRAP — constant copy of the interior edge cell.
-        ! Re-applying between passes ensures the stencil of the next pass reads the
-        ! filtered boundary value rather than the original pre-filter value, which would
+        ! Physical boundaries: BC_GHOST_EXTRAP - constant copy of the interior edge cell. Re-applying between passes ensures the
+        ! stencil of the next pass reads the filtered boundary value rather than the original pre-filter value, which would
         ! otherwise produce a step-like discontinuity at the domain edge and cause ringing.
         select case (mpi_dir)
         case (1)
