@@ -51,7 +51,7 @@ module m_data_input
 contains
 
     !> Helper subroutine to read grid data files for a given direction
-    impure subroutine s_read_grid_data_direction(t_step_dir, direction, cb_array, d_array, cc_array, size_dim)
+    impure subroutine s_read_grid_data_direction(t_step_dir, direction, cb_array, d_array, cc_array, size_dim, file_prefix)
 
         character(len=*), intent(in)             :: t_step_dir
         character(len=1), intent(in)             :: direction
@@ -59,10 +59,15 @@ contains
         real(wp), dimension(0:), intent(out)     :: d_array
         real(wp), dimension(0:), intent(out)     :: cc_array
         integer, intent(in)                      :: size_dim
-        character(LEN=len_trim(t_step_dir) + 10) :: file_loc
+        character(len=*), intent(in), optional   :: file_prefix
+        character(LEN=len_trim(t_step_dir) + 14) :: file_loc
         logical                                  :: file_check
 
-        file_loc = trim(t_step_dir) // '/' // direction // '_cb.dat'
+        if (present(file_prefix)) then
+            file_loc = trim(t_step_dir) // '/' // trim(file_prefix) // direction // '_cb.dat'
+        else
+            file_loc = trim(t_step_dir) // '/' // direction // '_cb.dat'
+        end if
         inquire (FILE=trim(file_loc), EXIST=file_check)
 
         if (file_check) then
@@ -70,7 +75,7 @@ contains
             read (1) cb_array(-1:size_dim)
             close (1)
         else
-            call s_mpi_abort('File ' // direction // '_cb.dat is missing in ' // trim(t_step_dir) // '. Exiting.')
+            call s_mpi_abort('File ' // trim(file_loc) // ' is missing. Exiting.')
         end if
 
         d_array(0:size_dim) = cb_array(0:size_dim) - cb_array(-1:size_dim - 1)
@@ -215,19 +220,39 @@ contains
             call s_assign_default_bc_type(bc_type)
         end if
 
-        call s_read_grid_data_direction(t_step_dir, 'x', x_cb, dx, x_cc, m)
+        ! When LSO downsampling is active, read the stride-sampled coordinate files written by simulation with the 'lso_' prefix
+        ! (lso_x_cb.dat, lso_y_cb.dat, lso_z_cb.dat). These contain the coarsened physical coordinates covering the full domain
+        ! extent with 1/N grid points per direction.
+        if (lso_filter_wrt .and. lso_down_sample_factor > 1) then
+            call s_read_grid_data_direction(t_step_dir, 'x', x_cb, dx, x_cc, m, 'lso_')
 
-        if (n > 0) then
-            call s_read_grid_data_direction(t_step_dir, 'y', y_cb, dy, y_cc, n)
+            if (n > 0) then
+                call s_read_grid_data_direction(t_step_dir, 'y', y_cb, dy, y_cc, n, 'lso_')
 
-            if (p > 0) then
-                call s_read_grid_data_direction(t_step_dir, 'z', z_cb, dz, z_cc, p)
+                if (p > 0) then
+                    call s_read_grid_data_direction(t_step_dir, 'z', z_cb, dz, z_cc, p, 'lso_')
+                end if
+            end if
+        else
+            call s_read_grid_data_direction(t_step_dir, 'x', x_cb, dx, x_cc, m)
+
+            if (n > 0) then
+                call s_read_grid_data_direction(t_step_dir, 'y', y_cb, dy, y_cc, n)
+
+                if (p > 0) then
+                    call s_read_grid_data_direction(t_step_dir, 'z', z_cb, dz, z_cc, p)
+                end if
             end if
         end if
 
         do i = 1, sys_size
             write (file_num, '(I0)') i
-            file_loc = trim(t_step_dir) // '/q_cons_vf' // trim(file_num) // '.dat'
+            ! When reading LSO-filtered data, look for the 'lso_' prefixed files written by simulation on the coarse grid.
+            if (lso_filter_wrt .and. lso_down_sample_factor > 1) then
+                file_loc = trim(t_step_dir) // '/lso_q_cons_vf' // trim(file_num) // '.dat'
+            else
+                file_loc = trim(t_step_dir) // '/q_cons_vf' // trim(file_num) // '.dat'
+            end if
             inquire (FILE=trim(file_loc), EXIST=file_check)
 
             if (file_check) then
@@ -277,6 +302,10 @@ contains
 
             if (down_sample) then
                 stride = 3
+            else if (lso_filter_wrt .and. lso_down_sample_factor > 1) then
+                ! When reading LSO-filtered output saved on a coarser grid, stride through the full-resolution coordinate file to
+                ! recover the correct physical domain extent with N times fewer grid points.
+                stride = lso_down_sample_factor
             else
                 stride = 1
             end if

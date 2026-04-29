@@ -307,8 +307,9 @@ contains
 
         ! When writing the primary (unfiltered) output: delete any stale directory and recreate it cleanly. When writing
         ! LSO-filtered output (lso_file_prefix /= ''), the directory was already created by the primary write and must not be
-        ! deleted - doing so would erase the unfiltered files. Grid coordinate files (x_cb.dat, etc.) are unchanged by filtering, so
-        ! they are only written once (on the primary pass).
+        ! deleted - doing so would erase the unfiltered files. Full-resolution coordinate files (x_cb.dat, etc.) are written only on
+        ! the primary pass. When LSO downsampling is active, stride-sampled coordinate files (lso_x_cb.dat, etc.) are written on the
+        ! LSO pass so that post_process can reconstruct the correct physical domain extent on the coarser grid.
         if (lso_file_prefix == '') then
             file_path = trim(t_step_dir) // '/.'
             call my_inquire(file_path, file_exist)
@@ -328,6 +329,24 @@ contains
                     file_path = trim(t_step_dir) // '/z_cb.dat'
                     open (2, FILE=trim(file_path), form='unformatted', STATUS='new')
                     write (2) z_cb(-1:p); close (2)
+                end if
+            end if
+        else if (lso_down_sample_factor > 1) then
+            ! Write stride-sampled coordinate files for the coarsened LSO output. The formula x_cb_coarse(j) = x_cb((j+1)*factor -
+            ! 1) for j = -1..m_lso_ds ensures that the domain boundaries (j=-1 and j=m_lso_ds) are preserved exactly.
+            file_path = trim(t_step_dir) // '/lso_x_cb.dat'
+            open (2, FILE=trim(file_path), form='unformatted', STATUS='replace')
+            write (2) (x_cb((j + 1)*lso_down_sample_factor - 1), j=-1, m_lso_ds); close (2)
+
+            if (n > 0) then
+                file_path = trim(t_step_dir) // '/lso_y_cb.dat'
+                open (2, FILE=trim(file_path), form='unformatted', STATUS='replace')
+                write (2) (y_cb((j + 1)*lso_down_sample_factor - 1), j=-1, n_lso_ds); close (2)
+
+                if (p > 0) then
+                    file_path = trim(t_step_dir) // '/lso_z_cb.dat'
+                    open (2, FILE=trim(file_path), form='unformatted', STATUS='replace')
+                    write (2) (z_cb((j + 1)*lso_down_sample_factor - 1), j=-1, p_lso_ds); close (2)
                 end if
             end if
         end if
