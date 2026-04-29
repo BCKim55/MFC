@@ -15,6 +15,8 @@ module m_lso_filter
 
     use m_derived_types
     use m_global_parameters
+    use m_mpi_common
+    use m_constants
 
     implicit none
 
@@ -97,8 +99,12 @@ contains
     !!
     !! For each spatial direction with lso_n_passes > 0, the routine iterates over the prescribed number of passes, applying a
     !! 9-point symmetric stencil per pass. Ghost cells populated by the preceding halo exchange supply boundary stencil values. The
-    !! filter is applied in-place on the interior (0:m, 0:n, 0:p); ghost cells are not updated between passes - this is acceptable
-    !! for a save-time output filter.
+    !! filter is applied in-place on the interior (0:m, 0:n, 0:p).
+    !!
+    !! The outer loop runs over passes and the inner loop over variables so that an MPI halo exchange can be issued between passes,
+    !! keeping the ghost cells consistent with the filtered interior of neighbouring ranks. Without this exchange, ghost cells at
+    !! MPI rank boundaries remain frozen at pre-filter values for every pass, which causes Gibbs-like ringing near discontinuities
+    !! (e.g. IBM ghost cells) that is absent in single-rank serial runs.
     !!
     !! @note  When time_stepper == 1 (forward Euler), stor == 1 and the live conserved
     !! variable array is modified in-place. For all Runge-Kutta time steppers (stor == 2) only the save-copy is affected and the
@@ -109,14 +115,15 @@ contains
         integer                           :: i, ipass, j, k, l
         real(wp)                          :: c0, c1, c2, c3, c4
 
-        do i = 1, sys_size
-            ! x-direction passes
-            do ipass = 1, lso_n_passes_x
-                c0 = lso_a_x(1, ipass)
-                c1 = lso_a_x(2, ipass)
-                c2 = lso_a_x(3, ipass)
-                c3 = lso_a_x(4, ipass)
-                c4 = lso_a_x(5, ipass)
+        ! x-direction passes: outer loop over passes so all variables are updated before the
+        ! inter-pass MPI exchange, which refreshes x-direction ghost cells at rank boundaries.
+        do ipass = 1, lso_n_passes_x
+            c0 = lso_a_x(1, ipass)
+            c1 = lso_a_x(2, ipass)
+            c2 = lso_a_x(3, ipass)
+            c3 = lso_a_x(4, ipass)
+            c4 = lso_a_x(5, ipass)
+            do i = 1, sys_size
                 $:GPU_PARALLEL_LOOP(collapse=3, private='[j, k, l]')
                 do l = 0, p
                     do k = 0, n
@@ -140,15 +147,21 @@ contains
                 end do
                 $:END_GPU_PARALLEL_LOOP()
             end do
+            if (ipass < lso_n_passes_x) call s_lso_filter_ghost_refresh(q_cons_vf, 1)
+        end do
 
-            ! y-direction passes (2D/3D only: n > 0)
-            if (n > 0) then
-                do ipass = 1, lso_n_passes_y
-                    c0 = lso_a_y(1, ipass)
-                    c1 = lso_a_y(2, ipass)
-                    c2 = lso_a_y(3, ipass)
-                    c3 = lso_a_y(4, ipass)
-                    c4 = lso_a_y(5, ipass)
+        ! y-direction passes (2D/3D only: n > 0)
+        ! Exchange y ghost cells before starting y passes so that the ghost cells of each rank
+        ! reflect the x-filtered interior values of its y-neighbours.
+        if (n > 0) then
+            call s_lso_filter_ghost_refresh(q_cons_vf, 2)
+            do ipass = 1, lso_n_passes_y
+                c0 = lso_a_y(1, ipass)
+                c1 = lso_a_y(2, ipass)
+                c2 = lso_a_y(3, ipass)
+                c3 = lso_a_y(4, ipass)
+                c4 = lso_a_y(5, ipass)
+                do i = 1, sys_size
                     $:GPU_PARALLEL_LOOP(collapse=3, private='[j, k, l]')
                     do l = 0, p
                         do k = 0, n
@@ -172,16 +185,20 @@ contains
                     end do
                     $:END_GPU_PARALLEL_LOOP()
                 end do
-            end if
+                if (ipass < lso_n_passes_y) call s_lso_filter_ghost_refresh(q_cons_vf, 2)
+            end do
+        end if
 
-            ! z-direction passes (3D only: p > 0)
-            if (p > 0) then
-                do ipass = 1, lso_n_passes_z
-                    c0 = lso_a_z(1, ipass)
-                    c1 = lso_a_z(2, ipass)
-                    c2 = lso_a_z(3, ipass)
-                    c3 = lso_a_z(4, ipass)
-                    c4 = lso_a_z(5, ipass)
+        ! z-direction passes (3D only: p > 0)
+        if (p > 0) then
+            call s_lso_filter_ghost_refresh(q_cons_vf, 3)
+            do ipass = 1, lso_n_passes_z
+                c0 = lso_a_z(1, ipass)
+                c1 = lso_a_z(2, ipass)
+                c2 = lso_a_z(3, ipass)
+                c3 = lso_a_z(4, ipass)
+                c4 = lso_a_z(5, ipass)
+                do i = 1, sys_size
                     $:GPU_PARALLEL_LOOP(collapse=3, private='[j, k, l]')
                     do l = 0, p
                         do k = 0, n
@@ -205,9 +222,140 @@ contains
                     end do
                     $:END_GPU_PARALLEL_LOOP()
                 end do
-            end if
-        end do
+                if (ipass < lso_n_passes_z) call s_lso_filter_ghost_refresh(q_cons_vf, 3)
+            end do
+        end if
 
     end subroutine s_apply_lso_filter
+
+    !> Refresh ghost cells for a given spatial direction between LSO filter passes.
+    !!
+    !! Handles two kinds of ghost cell sources:
+    !!
+    !! - MPI boundaries (bc >= 0): issues a sendrecv with the neighbouring rank so the ghost
+    !!   cells reflect the latest filtered interior values of that rank.
+    !!
+    !! - Physical boundaries (bc < 0): re-applies the boundary ghost cell rule using the
+    !!   current (filtered) state of the interior edge cells.  Currently implemented for
+    !!   BC_GHOST_EXTRAP (-3), which is a zeroth-order extrapolation (constant copy of the
+    !!   interior edge cell).  Other physical BCs (REFLECTIVE, PERIODIC single-rank, wall)
+    !!   are left unchanged here; they use the pre-filter ghost values for all passes, which
+    !!   is a small approximation acceptable for a save-time output filter.
+    !!
+    !! @param q_cons_vf  Conserved-variable array whose ghost cells are refreshed in-place.
+    !! @param mpi_dir    Spatial direction: 1 = x, 2 = y, 3 = z.
+    impure subroutine s_lso_filter_ghost_refresh(q_cons_vf, mpi_dir)
+
+        type(scalar_field), intent(inout) :: q_cons_vf(:)
+        integer, intent(in)               :: mpi_dir
+        integer                           :: i, j, k, l, beg_bc, end_bc
+
+        select case (mpi_dir)
+        case (1)
+            beg_bc = bc_x%beg
+            end_bc = bc_x%end
+        case (2)
+            beg_bc = bc_y%beg
+            end_bc = bc_y%end
+        case (3)
+            beg_bc = bc_z%beg
+            end_bc = bc_z%end
+        end select
+
+        ! MPI rank boundaries
+#ifdef MFC_MPI
+        if (beg_bc >= 0) call s_mpi_sendrecv_variables_buffers(q_cons_vf, mpi_dir, -1, sys_size)
+        if (end_bc >= 0) call s_mpi_sendrecv_variables_buffers(q_cons_vf, mpi_dir, 1, sys_size)
+#endif
+
+        ! Physical boundaries: BC_GHOST_EXTRAP — constant copy of the interior edge cell.
+        ! Re-applying between passes ensures the stencil of the next pass reads the
+        ! filtered boundary value rather than the original pre-filter value, which would
+        ! otherwise produce a step-like discontinuity at the domain edge and cause ringing.
+        select case (mpi_dir)
+        case (1)
+            if (beg_bc == BC_GHOST_EXTRAP) then
+                do i = 1, sys_size
+                    $:GPU_PARALLEL_LOOP(collapse=3, private='[j, k, l]')
+                    do l = 0, p
+                        do k = 0, n
+                            do j = 1, buff_size
+                                q_cons_vf(i)%sf(-j, k, l) = q_cons_vf(i)%sf(0, k, l)
+                            end do
+                        end do
+                    end do
+                    $:END_GPU_PARALLEL_LOOP()
+                end do
+            end if
+            if (end_bc == BC_GHOST_EXTRAP) then
+                do i = 1, sys_size
+                    $:GPU_PARALLEL_LOOP(collapse=3, private='[j, k, l]')
+                    do l = 0, p
+                        do k = 0, n
+                            do j = 1, buff_size
+                                q_cons_vf(i)%sf(m + j, k, l) = q_cons_vf(i)%sf(m, k, l)
+                            end do
+                        end do
+                    end do
+                    $:END_GPU_PARALLEL_LOOP()
+                end do
+            end if
+        case (2)
+            if (beg_bc == BC_GHOST_EXTRAP) then
+                do i = 1, sys_size
+                    $:GPU_PARALLEL_LOOP(collapse=3, private='[j, k, l]')
+                    do l = 0, p
+                        do k = 1, buff_size
+                            do j = 0, m
+                                q_cons_vf(i)%sf(j, -k, l) = q_cons_vf(i)%sf(j, 0, l)
+                            end do
+                        end do
+                    end do
+                    $:END_GPU_PARALLEL_LOOP()
+                end do
+            end if
+            if (end_bc == BC_GHOST_EXTRAP) then
+                do i = 1, sys_size
+                    $:GPU_PARALLEL_LOOP(collapse=3, private='[j, k, l]')
+                    do l = 0, p
+                        do k = 1, buff_size
+                            do j = 0, m
+                                q_cons_vf(i)%sf(j, n + k, l) = q_cons_vf(i)%sf(j, n, l)
+                            end do
+                        end do
+                    end do
+                    $:END_GPU_PARALLEL_LOOP()
+                end do
+            end if
+        case (3)
+            if (beg_bc == BC_GHOST_EXTRAP) then
+                do i = 1, sys_size
+                    $:GPU_PARALLEL_LOOP(collapse=3, private='[j, k, l]')
+                    do k = 0, n
+                        do j = 0, m
+                            do l = 1, buff_size
+                                q_cons_vf(i)%sf(j, k, -l) = q_cons_vf(i)%sf(j, k, 0)
+                            end do
+                        end do
+                    end do
+                    $:END_GPU_PARALLEL_LOOP()
+                end do
+            end if
+            if (end_bc == BC_GHOST_EXTRAP) then
+                do i = 1, sys_size
+                    $:GPU_PARALLEL_LOOP(collapse=3, private='[j, k, l]')
+                    do k = 0, n
+                        do j = 0, m
+                            do l = 1, buff_size
+                                q_cons_vf(i)%sf(j, k, p + l) = q_cons_vf(i)%sf(j, k, p)
+                            end do
+                        end do
+                    end do
+                    $:END_GPU_PARALLEL_LOOP()
+                end do
+            end if
+        end select
+
+    end subroutine s_lso_filter_ghost_refresh
 
 end module m_lso_filter
