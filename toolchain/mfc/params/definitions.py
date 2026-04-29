@@ -232,9 +232,9 @@ _SIMPLE_DESCS = {
     "ib_coefficient_of_friction": "Coefficient of friction for IB collisions",
     # LSO variable-weight filter
     "lso_filter": "Enable LSO variable-weight Gaussian filter (applied at save steps)",
-    "lso_filter_wrt": "Write LSO-filtered fields alongside unfiltered data using a 'lso_' filename prefix (e.g. lustre_lso_N.dat); post_process reads these files and writes to silo_hdf5_lso/ when this flag is set",
+    "lso_filter_wrt": "Write LSO-filtered fields with a 'lso_' filename prefix alongside unfiltered data",
     "filter_sigma": "Target Gaussian filter standard deviation (physical units, same as domain coordinates)",
-    "lso_down_sample_factor": "Stride factor for coarsening the LSO-filtered output grid (default 1 = no coarsening). Each direction is sampled at every Nth cell. Requires (m+1), (n+1), (p+1) to be divisible by this factor per MPI rank.",
+    "lso_down_sample_factor": "Stride factor for coarsening the LSO-filtered output grid (1 = no coarsening)",
     "acoustic_source": "Enable acoustic sources",
     # Output
     "parallel_io": "Enable parallel I/O",

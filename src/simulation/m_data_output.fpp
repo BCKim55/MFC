@@ -291,10 +291,11 @@ contains
         logical :: file_exist                               !< Logical used to check existence of current time-step directory
         character(LEN=15) :: FMT
         integer :: i, j, k, l, r
-        integer :: m_out, n_out, p_out  !< Effective output bounds (coarser for LSO downsampled, full otherwise)
+        integer :: m_out, n_out, p_out                      !< Effective output bounds (coarser for LSO downsampled, full otherwise)
         real(wp) :: gamma, lit_gamma, pi_inf, qv            !< Temporary EOS params
 
         ! Use coarsened bounds when writing LSO downsampled data, otherwise use full domain.
+
         if (lso_file_prefix /= '' .and. lso_down_sample_factor > 1) then
             m_out = m_lso_ds; n_out = n_lso_ds; p_out = p_lso_ds
         else
@@ -653,18 +654,19 @@ contains
 
     !> Set up MPI I/O data views for LSO stride-downsampled parallel file output.
     !!
-    !! Points MPI_IO_DATA%var(i) at q_filt_ds_vf(i)%sf(0:m_lso_ds, 0:n_lso_ds, 0:p_lso_ds) and creates
-    !! subarray types with the coarsened global/local dimensions so that each MPI rank writes its
-    !! correct portion of the coarser global file. The coarsened starting index is start_idx(d)/factor.
+    !! Points MPI_IO_DATA%var(i) at q_filt_ds_vf(i)%sf(0:m_lso_ds, 0:n_lso_ds, 0:p_lso_ds) and creates subarray types with the
+    !! coarsened global/local dimensions so that each MPI rank writes its correct portion of the coarser global file. The coarsened
+    !! starting index is start_idx(d)/factor.
     impure subroutine s_initialize_mpi_data_lso_ds(q_filt_ds_vf)
 
         type(scalar_field), dimension(sys_size), intent(in) :: q_filt_ds_vf
+
 #ifdef MFC_MPI
         integer, dimension(num_dims) :: sizes_glb, sizes_loc, start_lso
-        integer :: i, ierr
+        integer                      :: i, ierr
 
         do i = 1, sys_size
-            MPI_IO_DATA%var(i)%sf => q_filt_ds_vf(i)%sf(0:m_lso_ds, 0:n_lso_ds, 0:p_lso_ds)
+            MPI_IO_DATA%var(i)%sf => q_filt_ds_vf(i)%sf(0:m_lso_ds,0:n_lso_ds,0:p_lso_ds)
         end do
 
         sizes_glb(1) = m_glb_lso_ds + 1
@@ -684,7 +686,7 @@ contains
 
         do i = 1, sys_size
             call MPI_TYPE_CREATE_SUBARRAY(num_dims, sizes_glb, sizes_loc, start_lso, MPI_ORDER_FORTRAN, mpi_p, &
-                                          MPI_IO_DATA%view(i), ierr)
+                                          & MPI_IO_DATA%view(i), ierr)
             call MPI_TYPE_COMMIT(MPI_IO_DATA%view(i), ierr)
         end do
 #endif
@@ -815,8 +817,8 @@ contains
             call MPI_FILE_CLOSE(ifile, ierr)
         else
             ! For the LSO-filtered pass (lso_file_prefix /= ''), IB marker data is not written, so skip the ib_markers setup to
-            ! avoid re-committing already-committed MPI type handles from the primary pass.
-            ! When lso_down_sample_factor > 1, use the coarsened MPI views and dimensions.
+            ! avoid re-committing already-committed MPI type handles from the primary pass. When lso_down_sample_factor > 1, use the
+            ! coarsened MPI views and dimensions.
             if (lso_file_prefix /= '' .and. lso_down_sample_factor > 1) then
                 call s_initialize_mpi_data_lso_ds(q_cons_vf)
             else if (ib .and. lso_file_prefix == '') then

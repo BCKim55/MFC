@@ -856,8 +856,8 @@ contains
         else
             call s_write_data_files(q_cons_ts(stor)%vf, q_T_sf, q_prim_vf, save_count, bc_type)
         end if
-        ! Write LSO-filtered fields with an "lso_" filename prefix (e.g. lso_q_cons_vf1.dat) into the same timestep directory.
-        ! When lso_down_sample_factor > 1, stride-sample q_filt_vf into q_filt_ds_vf and write the coarser grid.
+        ! Write LSO-filtered fields with an "lso_" filename prefix (e.g. lso_q_cons_vf1.dat) into the same timestep directory. When
+        ! lso_down_sample_factor > 1, stride-sample q_filt_vf into q_filt_ds_vf and write the coarser grid.
         if (lso_filter .and. lso_filter_wrt) then
             do i = 1, sys_size
 #ifndef FRONTIER_UNIFIED
@@ -925,6 +925,26 @@ contains
         call s_initialize_mpi_proxy_module()
         call s_initialize_variables_conversion_module()
         if (grid_geometry == 3) call s_initialize_fftw_module()
+
+        ! Compute LSO downsampled grid dimensions now that per-rank m/n/p are known (must be done before
+        ! s_initialize_lso_filter_module allocates q_filt_ds_vf)
+        if (lso_filter_wrt .and. lso_down_sample_factor > 1) then
+            m_lso_ds = int((m + 1)/lso_down_sample_factor) - 1
+            m_glb_lso_ds = int((m_glb + 1)/lso_down_sample_factor) - 1
+            if (n > 0) then
+                n_lso_ds = int((n + 1)/lso_down_sample_factor) - 1
+                n_glb_lso_ds = int((n_glb + 1)/lso_down_sample_factor) - 1
+            else
+                n_lso_ds = 0; n_glb_lso_ds = 0
+            end if
+            if (p > 0) then
+                p_lso_ds = int((p + 1)/lso_down_sample_factor) - 1
+                p_glb_lso_ds = int((p_glb + 1)/lso_down_sample_factor) - 1
+            else
+                p_lso_ds = 0; p_glb_lso_ds = 0
+            end if
+        end if
+
         if (lso_filter) call s_initialize_lso_filter_module()
 
         if (bubbles_euler) call s_initialize_bubbles_EE_module()

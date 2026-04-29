@@ -97,9 +97,9 @@ contains
                 p = int((p + 1)/3) - 1
             end if
 
-            ! When reading LSO-filtered output that was saved on a coarser grid, adjust the grid dimensions.
-            ! The secondary (unfiltered) pass is not supported in this mode; run post_process again with
-            ! lso_filter_wrt = .false. to process the unfiltered data at full resolution.
+            ! When reading LSO-filtered output that was saved on a coarser grid, adjust the grid dimensions. The secondary
+            ! (unfiltered) pass is not supported in this mode; run post_process again with lso_filter_wrt = .false. to process the
+            ! unfiltered data at full resolution.
             if (lso_filter_wrt .and. lso_down_sample_factor > 1) then
                 m = int((m + 1)/lso_down_sample_factor) - 1
                 if (n > 0) n = int((n + 1)/lso_down_sample_factor) - 1

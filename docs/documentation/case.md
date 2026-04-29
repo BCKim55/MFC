@@ -651,6 +651,7 @@ To restart the simulation from $k$-th time step, see @ref running "Restarting Ca
 | `fft_wrt`               | Logical | Enable FFT output |
 | `lso_filter`            | Logical | Enable LSO variable-weight Gaussian filter applied to conserved variables at each data-save step |
 | `lso_filter_wrt`        | Logical | Write LSO-filtered fields to `<case_dir>/lso/`; unfiltered data written to the primary output path |
+| `lso_down_sample_factor`| Integer | Stride factor for coarsening the LSO-filtered output grid (1 = no coarsening). Each direction is sampled every N cells, reducing storage by N^dims. |
 | `filter_sigma`          | Real    | Target Gaussian filter standard deviation in physical units (same as domain coordinates) |
 | `lso_n_passes_x`        | Integer | Number of LSO filter passes in x-direction (auto-derived from particle diameter and grid spacing) |
 | `lso_n_passes_y`        | Integer | Number of LSO filter passes in y-direction (auto-derived from particle diameter and grid spacing) |
