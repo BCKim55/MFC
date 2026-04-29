@@ -7,6 +7,7 @@ program p_main
 
     use m_global_parameters
     use m_start_up
+    use m_data_output, only: s_switch_output_dirs
 
     implicit none
 
@@ -39,9 +40,22 @@ program p_main
 
         call cpu_time(start)
 
+        ! Primary pass: read (LSO-filtered when lso_filter_wrt=T) and write.
         call s_perform_time_step(t_step)
 
         call s_save_data(t_step, varname, pres, c, H)
+
+        ! Secondary pass: when lso_filter_wrt=T, also write the unfiltered data to silo_hdf5/. Grid files are NOT re-opened
+        ! (grid_loaded flag skips them), avoiding a known MPI-IO hang from re-opening the same file with
+        ! MPI_FILE_OPEN(MPI_COMM_WORLD, fp) a second time.
+        if (lso_filter_wrt) then
+            lso_filter_wrt = .false.
+            call s_reload_data(t_step)
+            call s_switch_output_dirs(.false.)
+            call s_save_data(t_step, varname, pres, c, H)
+            call s_switch_output_dirs(.true.)
+            lso_filter_wrt = .true.
+        end if
 
         call cpu_time(finish)
 

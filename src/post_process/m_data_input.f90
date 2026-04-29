@@ -42,6 +42,10 @@ module m_data_input
     ! type(scalar_field), public :: ib_markers !<
     type(integer_field), public :: ib_markers
 
+    !> Set to .true. after grid coordinates are first loaded; prevents re-opening grid files (x_cb.dat, y_cb.dat, z_cb.dat) via
+    !! MPI_FILE_OPEN(MPI_COMM_WORLD, fp) on subsequent calls to s_read_parallel_data_files (e.g. the LSO two-pass write).
+    logical :: grid_loaded = .false.
+
     procedure(s_read_abstract_data_files), pointer :: s_read_data_files => null()
 
 contains
@@ -263,45 +267,25 @@ contains
         character(len=10)                    :: t_step_string
         integer                              :: i
 
-        allocate (x_cb_glb(-1:m_glb))
-        allocate (y_cb_glb(-1:n_glb))
-        allocate (z_cb_glb(-1:p_glb))
+        ! Grid coordinates are invariant across time steps: only read them once. On subsequent calls (e.g. the unfiltered second
+        ! pass when lso_filter_wrt=T), skip grid file reads to avoid a known MPI-IO hang when re-opening the same file with
+        ! MPI_FILE_OPEN(MPI_COMM_WORLD, fp) a second time.
+        if (.not. grid_loaded) then
+            allocate (x_cb_glb(-1:m_glb))
+            allocate (y_cb_glb(-1:n_glb))
+            allocate (z_cb_glb(-1:p_glb))
 
-        if (down_sample) then
-            stride = 3
-        else
-            stride = 1
-        end if
+            if (down_sample) then
+                stride = 3
+            else
+                stride = 1
+            end if
 
-        file_loc = trim(case_dir) // '/restart_data' // trim(mpiiofs) // 'x_cb.dat'
-        inquire (FILE=trim(file_loc), EXIST=file_exist)
-
-        if (file_exist) then
-            data_size = m_glb + 2
-            call MPI_FILE_OPEN(MPI_COMM_WORLD, file_loc, MPI_MODE_RDONLY, mpi_info_int, ifile, ierr)
-
-            call MPI_TYPE_VECTOR(data_size, 1, stride, mpi_p, filetype, ierr)
-            call MPI_TYPE_COMMIT(filetype, ierr)
-
-            offset = 0
-            call MPI_FILE_SET_VIEW(ifile, offset, mpi_p, filetype, 'native', mpi_info_int, ierr)
-
-            call MPI_FILE_READ(ifile, x_cb_glb, data_size, mpi_p, status, ierr)
-            call MPI_FILE_CLOSE(ifile, ierr)
-        else
-            call s_mpi_abort('File ' // trim(file_loc) // ' is missing. Exiting.')
-        end if
-
-        x_cb(-1:m) = x_cb_glb((start_idx(1) - 1):(start_idx(1) + m))
-        dx(0:m) = x_cb(0:m) - x_cb(-1:m - 1)
-        x_cc(0:m) = x_cb(-1:m - 1) + dx(0:m)/2._wp
-
-        if (n > 0) then
-            file_loc = trim(case_dir) // '/restart_data' // trim(mpiiofs) // 'y_cb.dat'
+            file_loc = trim(case_dir) // '/restart_data' // trim(mpiiofs) // 'x_cb.dat'
             inquire (FILE=trim(file_loc), EXIST=file_exist)
 
             if (file_exist) then
-                data_size = n_glb + 2
+                data_size = m_glb + 2
                 call MPI_FILE_OPEN(MPI_COMM_WORLD, file_loc, MPI_MODE_RDONLY, mpi_info_int, ifile, ierr)
 
                 call MPI_TYPE_VECTOR(data_size, 1, stride, mpi_p, filetype, ierr)
@@ -310,22 +294,22 @@ contains
                 offset = 0
                 call MPI_FILE_SET_VIEW(ifile, offset, mpi_p, filetype, 'native', mpi_info_int, ierr)
 
-                call MPI_FILE_READ(ifile, y_cb_glb, data_size, mpi_p, status, ierr)
+                call MPI_FILE_READ(ifile, x_cb_glb, data_size, mpi_p, status, ierr)
                 call MPI_FILE_CLOSE(ifile, ierr)
             else
                 call s_mpi_abort('File ' // trim(file_loc) // ' is missing. Exiting.')
             end if
 
-            y_cb(-1:n) = y_cb_glb((start_idx(2) - 1):(start_idx(2) + n))
-            dy(0:n) = y_cb(0:n) - y_cb(-1:n - 1)
-            y_cc(0:n) = y_cb(-1:n - 1) + dy(0:n)/2._wp
+            x_cb(-1:m) = x_cb_glb((start_idx(1) - 1):(start_idx(1) + m))
+            dx(0:m) = x_cb(0:m) - x_cb(-1:m - 1)
+            x_cc(0:m) = x_cb(-1:m - 1) + dx(0:m)/2._wp
 
-            if (p > 0) then
-                file_loc = trim(case_dir) // '/restart_data' // trim(mpiiofs) // 'z_cb.dat'
+            if (n > 0) then
+                file_loc = trim(case_dir) // '/restart_data' // trim(mpiiofs) // 'y_cb.dat'
                 inquire (FILE=trim(file_loc), EXIST=file_exist)
 
                 if (file_exist) then
-                    data_size = p_glb + 2
+                    data_size = n_glb + 2
                     call MPI_FILE_OPEN(MPI_COMM_WORLD, file_loc, MPI_MODE_RDONLY, mpi_info_int, ifile, ierr)
 
                     call MPI_TYPE_VECTOR(data_size, 1, stride, mpi_p, filetype, ierr)
@@ -334,21 +318,47 @@ contains
                     offset = 0
                     call MPI_FILE_SET_VIEW(ifile, offset, mpi_p, filetype, 'native', mpi_info_int, ierr)
 
-                    call MPI_FILE_READ(ifile, z_cb_glb, data_size, mpi_p, status, ierr)
+                    call MPI_FILE_READ(ifile, y_cb_glb, data_size, mpi_p, status, ierr)
                     call MPI_FILE_CLOSE(ifile, ierr)
                 else
                     call s_mpi_abort('File ' // trim(file_loc) // ' is missing. Exiting.')
                 end if
 
-                z_cb(-1:p) = z_cb_glb((start_idx(3) - 1):(start_idx(3) + p))
-                dz(0:p) = z_cb(0:p) - z_cb(-1:p - 1)
-                z_cc(0:p) = z_cb(-1:p - 1) + dz(0:p)/2._wp
+                y_cb(-1:n) = y_cb_glb((start_idx(2) - 1):(start_idx(2) + n))
+                dy(0:n) = y_cb(0:n) - y_cb(-1:n - 1)
+                y_cc(0:n) = y_cb(-1:n - 1) + dy(0:n)/2._wp
+
+                if (p > 0) then
+                    file_loc = trim(case_dir) // '/restart_data' // trim(mpiiofs) // 'z_cb.dat'
+                    inquire (FILE=trim(file_loc), EXIST=file_exist)
+
+                    if (file_exist) then
+                        data_size = p_glb + 2
+                        call MPI_FILE_OPEN(MPI_COMM_WORLD, file_loc, MPI_MODE_RDONLY, mpi_info_int, ifile, ierr)
+
+                        call MPI_TYPE_VECTOR(data_size, 1, stride, mpi_p, filetype, ierr)
+                        call MPI_TYPE_COMMIT(filetype, ierr)
+
+                        offset = 0
+                        call MPI_FILE_SET_VIEW(ifile, offset, mpi_p, filetype, 'native', mpi_info_int, ierr)
+
+                        call MPI_FILE_READ(ifile, z_cb_glb, data_size, mpi_p, status, ierr)
+                        call MPI_FILE_CLOSE(ifile, ierr)
+                    else
+                        call s_mpi_abort('File ' // trim(file_loc) // ' is missing. Exiting.')
+                    end if
+
+                    z_cb(-1:p) = z_cb_glb((start_idx(3) - 1):(start_idx(3) + p))
+                    dz(0:p) = z_cb(0:p) - z_cb(-1:p - 1)
+                    z_cc(0:p) = z_cb(-1:p - 1) + dz(0:p)/2._wp
+                end if
             end if
+
+            deallocate (x_cb_glb, y_cb_glb, z_cb_glb)
+            grid_loaded = .true.
         end if
 
         call s_read_parallel_conservative_data(t_step, m_MOK, n_MOK, p_MOK, WP_MOK, MOK, str_MOK, NVARS_MOK)
-
-        deallocate (x_cb_glb, y_cb_glb, z_cb_glb)
 
         if (bc_io) then
             call s_read_parallel_boundary_condition_files(bc_type)
@@ -379,11 +389,13 @@ contains
             call s_int_to_str(t_step, t_step_string)
             write (file_loc_base, '(I0,A1,I7.7,A)') t_step, '_', proc_rank, '.dat'
             if (lso_filter_wrt) then
-                file_loc = trim(case_dir) // '/restart_data/lustre_' // trim(t_step_string) // trim(mpiiofs) // 'lso_' // trim(file_loc_base)
+                file_loc = trim(case_dir) // '/restart_data/lustre_' // trim(t_step_string) // trim(mpiiofs) // 'lso_' &
+                                & // trim(file_loc_base)
                 inquire (FILE=trim(file_loc), EXIST=file_exist)
                 if (.not. file_exist) then
                     ! LSO file absent (e.g. initial condition from pre_process): fall back to unfiltered
-                    file_loc = trim(case_dir) // '/restart_data/lustre_' // trim(t_step_string) // trim(mpiiofs) // trim(file_loc_base)
+                    file_loc = trim(case_dir) // '/restart_data/lustre_' // trim(t_step_string) // trim(mpiiofs) &
+                                    & // trim(file_loc_base)
                     inquire (FILE=trim(file_loc), EXIST=file_exist)
                 end if
             else
