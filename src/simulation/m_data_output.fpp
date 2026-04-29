@@ -291,7 +291,15 @@ contains
         logical :: file_exist                               !< Logical used to check existence of current time-step directory
         character(LEN=15) :: FMT
         integer :: i, j, k, l, r
+        integer :: m_out, n_out, p_out  !< Effective output bounds (coarser for LSO downsampled, full otherwise)
         real(wp) :: gamma, lit_gamma, pi_inf, qv            !< Temporary EOS params
+
+        ! Use coarsened bounds when writing LSO downsampled data, otherwise use full domain.
+        if (lso_file_prefix /= '' .and. lso_down_sample_factor > 1) then
+            m_out = m_lso_ds; n_out = n_lso_ds; p_out = p_lso_ds
+        else
+            m_out = m; n_out = n; p_out = p
+        end if
 
         write (t_step_dir, '(A,I0,A,I0)') trim(case_dir) // '/p_all'
         write (t_step_dir, '(a,i0,a,i0)') trim(case_dir) // '/p_all/p', proc_rank, '/', t_step
@@ -328,7 +336,7 @@ contains
 
             open (2, FILE=trim(file_path), form='unformatted', STATUS='new')
 
-            write (2) q_cons_vf(i)%sf(0:m,0:n,0:p); close (2)
+            write (2) q_cons_vf(i)%sf(0:m_out,0:n_out,0:p_out); close (2)
         end do
 
         ! Lagrangian beta (void fraction) written as q_cons_vf(sys_size+1) to match the parallel I/O path and allow post_process to
@@ -338,7 +346,7 @@ contains
 
             open (2, FILE=trim(file_path), form='unformatted', STATUS='new')
 
-            write (2) beta%sf(0:m,0:n,0:p); close (2)
+            write (2) beta%sf(0:m_out,0:n_out,0:p_out); close (2)
         end if
 
         ! QBMM pb/mv fields are not filtered by LSO; write only on the primary pass.
@@ -643,6 +651,46 @@ contains
 
     end subroutine s_write_serial_data_files
 
+    !> Set up MPI I/O data views for LSO stride-downsampled parallel file output.
+    !!
+    !! Points MPI_IO_DATA%var(i) at q_filt_ds_vf(i)%sf(0:m_lso_ds, 0:n_lso_ds, 0:p_lso_ds) and creates
+    !! subarray types with the coarsened global/local dimensions so that each MPI rank writes its
+    !! correct portion of the coarser global file. The coarsened starting index is start_idx(d)/factor.
+    private subroutine s_initialize_mpi_data_lso_ds(q_filt_ds_vf)
+
+        type(scalar_field), dimension(sys_size), intent(in) :: q_filt_ds_vf
+#ifdef MFC_MPI
+        integer, dimension(num_dims) :: sizes_glb, sizes_loc, start_lso
+        integer :: i, ierr
+
+        do i = 1, sys_size
+            MPI_IO_DATA%var(i)%sf => q_filt_ds_vf(i)%sf(0:m_lso_ds, 0:n_lso_ds, 0:p_lso_ds)
+        end do
+
+        sizes_glb(1) = m_glb_lso_ds + 1
+        sizes_loc(1) = m_lso_ds + 1
+        start_lso(1) = start_idx(1)/lso_down_sample_factor
+
+        if (num_dims >= 2) then
+            sizes_glb(2) = n_glb_lso_ds + 1
+            sizes_loc(2) = n_lso_ds + 1
+            start_lso(2) = start_idx(2)/lso_down_sample_factor
+        end if
+        if (num_dims == 3) then
+            sizes_glb(3) = p_glb_lso_ds + 1
+            sizes_loc(3) = p_lso_ds + 1
+            start_lso(3) = start_idx(3)/lso_down_sample_factor
+        end if
+
+        do i = 1, sys_size
+            call MPI_TYPE_CREATE_SUBARRAY(num_dims, sizes_glb, sizes_loc, start_lso, MPI_ORDER_FORTRAN, mpi_p, &
+                                          MPI_IO_DATA%view(i), ierr)
+            call MPI_TYPE_COMMIT(MPI_IO_DATA%view(i), ierr)
+        end do
+#endif
+
+    end subroutine s_initialize_mpi_data_lso_ds
+
     !> Write grid and conservative variable data files in parallel via MPI I/O
     impure subroutine s_write_parallel_data_files(q_cons_vf, t_step, bc_type, beta, q_T_sf)
 
@@ -768,7 +816,10 @@ contains
         else
             ! For the LSO-filtered pass (lso_file_prefix /= ''), IB marker data is not written, so skip the ib_markers setup to
             ! avoid re-committing already-committed MPI type handles from the primary pass.
-            if (ib .and. lso_file_prefix == '') then
+            ! When lso_down_sample_factor > 1, use the coarsened MPI views and dimensions.
+            if (lso_file_prefix /= '' .and. lso_down_sample_factor > 1) then
+                call s_initialize_mpi_data_lso_ds(q_cons_vf)
+            else if (ib .and. lso_file_prefix == '') then
                 call s_initialize_mpi_data(q_cons_vf, ib_markers)
             else if (present(beta)) then
                 call s_initialize_mpi_data(q_cons_vf, beta=beta)
@@ -784,11 +835,17 @@ contains
             end if
             call MPI_FILE_OPEN(MPI_COMM_WORLD, file_loc, ior(MPI_MODE_WRONLY, MPI_MODE_CREATE), mpi_info_int, ifile, ierr)
 
-            data_size = (m + 1)*(n + 1)*(p + 1)
-
-            m_MOK = int(m_glb + 1, MPI_OFFSET_KIND)
-            n_MOK = int(n_glb + 1, MPI_OFFSET_KIND)
-            p_MOK = int(p_glb + 1, MPI_OFFSET_KIND)
+            if (lso_file_prefix /= '' .and. lso_down_sample_factor > 1) then
+                data_size = (m_lso_ds + 1)*(n_lso_ds + 1)*(p_lso_ds + 1)
+                m_MOK = int(m_glb_lso_ds + 1, MPI_OFFSET_KIND)
+                n_MOK = int(n_glb_lso_ds + 1, MPI_OFFSET_KIND)
+                p_MOK = int(p_glb_lso_ds + 1, MPI_OFFSET_KIND)
+            else
+                data_size = (m + 1)*(n + 1)*(p + 1)
+                m_MOK = int(m_glb + 1, MPI_OFFSET_KIND)
+                n_MOK = int(n_glb + 1, MPI_OFFSET_KIND)
+                p_MOK = int(p_glb + 1, MPI_OFFSET_KIND)
+            end if
             WP_MOK = int(storage_size(0._stp)/8, MPI_OFFSET_KIND)
             MOK = int(1._wp, MPI_OFFSET_KIND)
             str_MOK = int(name_len, MPI_OFFSET_KIND)

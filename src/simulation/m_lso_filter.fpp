@@ -22,8 +22,8 @@ module m_lso_filter
 
     private
 
-    public :: s_initialize_lso_filter_module, s_apply_lso_filter, s_copy_and_apply_lso_filter, s_finalize_lso_filter_module, &
-        & q_filt_vf
+    public :: s_initialize_lso_filter_module, s_apply_lso_filter, s_copy_and_apply_lso_filter, s_lso_stride_sample, &
+        & s_finalize_lso_filter_module, q_filt_vf, q_filt_ds_vf
 
     !> Temporary working buffer for one directional filter pass (interior cells only)
     real(wp), allocatable, dimension(:,:,:) :: lso_tmp
@@ -31,6 +31,9 @@ module m_lso_filter
 
     !> Filtered copy of the conserved variables (only allocated when lso_filter_wrt = T)
     type(scalar_field), allocatable :: q_filt_vf(:)
+
+    !> Stride-sampled (coarsened) copy of q_filt_vf (only allocated when lso_filter_wrt .and. lso_down_sample_factor > 1)
+    type(scalar_field), allocatable :: q_filt_ds_vf(:)
 
 contains
 
@@ -51,11 +54,18 @@ contains
             do i = 1, sys_size
                 @:ACC_SETUP_SFs(q_filt_vf(i))
             end do
+
+            if (lso_down_sample_factor > 1) then
+                @:ALLOCATE(q_filt_ds_vf(1:sys_size))
+                do i = 1, sys_size
+                    @:ALLOCATE(q_filt_ds_vf(i)%sf(0:m_lso_ds, 0:n_lso_ds, 0:p_lso_ds))
+                end do
+            end if
         end if
 
     end subroutine s_initialize_lso_filter_module
 
-    !> Deallocate the temporary pass buffer and, when allocated, q_filt_vf.
+    !> Deallocate the temporary pass buffer and, when allocated, q_filt_vf and q_filt_ds_vf.
     impure subroutine s_finalize_lso_filter_module()
 
         integer :: i
@@ -67,6 +77,13 @@ contains
                 @:DEALLOCATE(q_filt_vf(i)%sf)
             end do
             @:DEALLOCATE(q_filt_vf)
+
+            if (lso_down_sample_factor > 1) then
+                do i = 1, sys_size
+                    @:DEALLOCATE(q_filt_ds_vf(i)%sf)
+                end do
+                @:DEALLOCATE(q_filt_ds_vf)
+            end if
         end if
 
     end subroutine s_finalize_lso_filter_module
@@ -227,6 +244,34 @@ contains
         end if
 
     end subroutine s_apply_lso_filter
+
+    !> Stride-sample (decimate) q_src_vf into q_dst_vf with the given integer factor in all active directions.
+    !!
+    !! The filtered source data is already band-limited by the LSO filter, so a simple stride pick (every Nth
+    !! cell, starting at index 0) is a valid decimation with no additional anti-aliasing needed. The destination
+    !! array must be allocated to (0:m_lso_ds, 0:n_lso_ds, 0:p_lso_ds) by the caller.
+    !!
+    !! @param q_src_vf   Source conserved-variable array (full grid, interior cells 0:m, 0:n, 0:p on host).
+    !! @param q_dst_vf   Destination array (coarsened, 0:m_lso_ds, etc.).
+    !! @param fac        Stride factor (positive integer; 1 = identity copy).
+    impure subroutine s_lso_stride_sample(q_src_vf, q_dst_vf, fac)
+
+        type(scalar_field), intent(in)    :: q_src_vf(:)
+        type(scalar_field), intent(inout) :: q_dst_vf(:)
+        integer, intent(in)               :: fac
+        integer                           :: i, j, k, l
+
+        do i = 1, sys_size
+            do l = 0, p_lso_ds
+                do k = 0, n_lso_ds
+                    do j = 0, m_lso_ds
+                        q_dst_vf(i)%sf(j, k, l) = q_src_vf(i)%sf(j*fac, k*fac, l*fac)
+                    end do
+                end do
+            end do
+        end do
+
+    end subroutine s_lso_stride_sample
 
     !> Refresh ghost cells for a given spatial direction between LSO filter passes.
     !!

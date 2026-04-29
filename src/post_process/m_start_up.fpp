@@ -70,7 +70,8 @@ contains
             & bubbles_lagrange, sim_data, hyperelasticity, Bx0, relativity, cont_damage, hyper_cleaning, num_bc_patches, igr, &
             & igr_order, down_sample, recon_type, muscl_order, lag_header, lag_txt_wrt, lag_db_wrt, lag_id_wrt, lag_pos_wrt, &
             & lag_pos_prev_wrt, lag_vel_wrt, lag_rad_wrt, lag_rvel_wrt, lag_r0_wrt, lag_rmax_wrt, lag_rmin_wrt, lag_dphidt_wrt, &
-            & lag_pres_wrt, lag_mv_wrt, lag_mg_wrt, lag_betaT_wrt, lag_betaC_wrt, alpha_rho_e_wrt, ib_state_wrt, lso_filter_wrt
+            & lag_pres_wrt, lag_mv_wrt, lag_mg_wrt, lag_betaT_wrt, lag_betaC_wrt, alpha_rho_e_wrt, ib_state_wrt, lso_filter_wrt, &
+            & lso_down_sample_factor
 
         file_loc = 'post_process.inp'
         inquire (FILE=trim(file_loc), EXIST=file_check)
@@ -94,6 +95,15 @@ contains
                 m = int((m + 1)/3) - 1
                 n = int((n + 1)/3) - 1
                 p = int((p + 1)/3) - 1
+            end if
+
+            ! When reading LSO-filtered output that was saved on a coarser grid, adjust the grid dimensions.
+            ! The secondary (unfiltered) pass is not supported in this mode; run post_process again with
+            ! lso_filter_wrt = .false. to process the unfiltered data at full resolution.
+            if (lso_filter_wrt .and. lso_down_sample_factor > 1) then
+                m = int((m + 1)/lso_down_sample_factor) - 1
+                if (n > 0) n = int((n + 1)/lso_down_sample_factor) - 1
+                if (p > 0) p = int((p + 1)/lso_down_sample_factor) - 1
             end if
 
             m_glb = m

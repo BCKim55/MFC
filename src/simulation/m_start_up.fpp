@@ -114,7 +114,8 @@ contains
             & lag_params, hyperelasticity, R0ref, num_bc_patches, Bx0, cont_damage, tau_star, cont_damage_s, alpha_bar, &
             & hyper_cleaning, hyper_cleaning_speed, hyper_cleaning_tau, alf_factor, num_igr_iters, num_igr_warm_start_iters, &
             & int_comp, ic_eps, ic_beta, nv_uvm_out_of_core, nv_uvm_igr_temps_on_gpu, nv_uvm_pref_gpu, down_sample, fft_wrt, &
-            & lso_filter, lso_filter_wrt, filter_sigma, lso_n_passes_x, lso_n_passes_y, lso_n_passes_z, lso_a_x, lso_a_y, lso_a_z
+            & lso_filter, lso_filter_wrt, filter_sigma, lso_down_sample_factor, lso_n_passes_x, lso_n_passes_y, lso_n_passes_z, &
+            & lso_a_x, lso_a_y, lso_a_z
 
         inquire (FILE=trim(file_path), EXIST=file_exist)
 
@@ -335,6 +336,25 @@ contains
             m_glb_ds = int((m_glb + 1)/3) - 1
             n_glb_ds = int((n_glb + 1)/3) - 1
             p_glb_ds = int((p_glb + 1)/3) - 1
+        end if
+
+        if (lso_filter_wrt .and. lso_down_sample_factor > 1) then
+            m_lso_ds = int((m + 1)/lso_down_sample_factor) - 1
+            m_glb_lso_ds = int((m_glb + 1)/lso_down_sample_factor) - 1
+            if (n > 0) then
+                n_lso_ds = int((n + 1)/lso_down_sample_factor) - 1
+                n_glb_lso_ds = int((n_glb + 1)/lso_down_sample_factor) - 1
+            else
+                n_lso_ds = 0
+                n_glb_lso_ds = 0
+            end if
+            if (p > 0) then
+                p_lso_ds = int((p + 1)/lso_down_sample_factor) - 1
+                p_glb_lso_ds = int((p_glb + 1)/lso_down_sample_factor) - 1
+            else
+                p_lso_ds = 0
+                p_glb_lso_ds = 0
+            end if
         end if
 
         if (file_exist) then
@@ -837,6 +857,7 @@ contains
             call s_write_data_files(q_cons_ts(stor)%vf, q_T_sf, q_prim_vf, save_count, bc_type)
         end if
         ! Write LSO-filtered fields with an "lso_" filename prefix (e.g. lso_q_cons_vf1.dat) into the same timestep directory.
+        ! When lso_down_sample_factor > 1, stride-sample q_filt_vf into q_filt_ds_vf and write the coarser grid.
         if (lso_filter .and. lso_filter_wrt) then
             do i = 1, sys_size
 #ifndef FRONTIER_UNIFIED
@@ -844,10 +865,19 @@ contains
 #endif
             end do
             lso_file_prefix = 'lso_'
-            if (bubbles_lagrange) then
-                call s_write_data_files(q_filt_vf, q_T_sf, q_prim_vf, save_count, bc_type, q_beta(1))
+            if (lso_down_sample_factor > 1) then
+                call s_lso_stride_sample(q_filt_vf, q_filt_ds_vf, lso_down_sample_factor)
+                if (bubbles_lagrange) then
+                    call s_write_data_files(q_filt_ds_vf, q_T_sf, q_prim_vf, save_count, bc_type, q_beta(1))
+                else
+                    call s_write_data_files(q_filt_ds_vf, q_T_sf, q_prim_vf, save_count, bc_type)
+                end if
             else
-                call s_write_data_files(q_filt_vf, q_T_sf, q_prim_vf, save_count, bc_type)
+                if (bubbles_lagrange) then
+                    call s_write_data_files(q_filt_vf, q_T_sf, q_prim_vf, save_count, bc_type, q_beta(1))
+                else
+                    call s_write_data_files(q_filt_vf, q_T_sf, q_prim_vf, save_count, bc_type)
+                end if
             end if
             lso_file_prefix = ''
         end if

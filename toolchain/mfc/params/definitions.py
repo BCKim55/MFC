@@ -237,6 +237,7 @@ _SIMPLE_DESCS = {
     "lso_filter": "Enable LSO variable-weight Gaussian filter (applied at save steps)",
     "lso_filter_wrt": "Write LSO-filtered fields alongside unfiltered data using a 'lso_' filename prefix (e.g. lustre_lso_N.dat); post_process reads these files and writes to silo_hdf5_lso/ when this flag is set",
     "filter_sigma": "Target Gaussian filter standard deviation (physical units, same as domain coordinates)",
+    "lso_down_sample_factor": "Stride factor for coarsening the LSO-filtered output grid (default 1 = no coarsening). Each direction is sampled at every Nth cell. Requires (m+1), (n+1), (p+1) to be divisible by this factor per MPI rank.",
     "acoustic_source": "Enable acoustic sources",
     # Output
     "parallel_io": "Enable parallel I/O",
@@ -953,6 +954,7 @@ def _load():
     _r("lso_filter", LOG, {"filter"})
     _r("lso_filter_wrt", LOG, {"filter"})
     _r("filter_sigma", REAL, {"filter"})
+    _r("lso_down_sample_factor", INT, {"filter"})
     for n in ["lso_n_passes_x", "lso_n_passes_y", "lso_n_passes_z"]:
         _r(n, INT, {"filter"})
     for n in ["lso_a_x", "lso_a_y", "lso_a_z"]:
