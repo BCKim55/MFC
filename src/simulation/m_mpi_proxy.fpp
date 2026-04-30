@@ -77,7 +77,7 @@ contains
             & 'num_source', 'relax_model', 'num_ibs', 'n_start',    &
             & 'num_bc_patches', 'num_igr_iters', 'num_igr_warm_start_iters', &
             & 'adap_dt_max_iters', 'collision_model', &
-            & 'lso_n_passes_x', 'lso_n_passes_y', 'lso_n_passes_z' ]
+            & 'lso_down_sample_factor', 'lso_n_passes_x', 'lso_n_passes_y', 'lso_n_passes_z' ]
             call MPI_BCAST(${VAR}$, 1, MPI_INTEGER, 0, MPI_COMM_WORLD, ierr)
         #:endfor
 
