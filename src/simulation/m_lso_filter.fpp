@@ -207,7 +207,6 @@ contains
         ! RK-updated interior rather than an intermediate sub-step.
 
         call nvtxStartRange("LSO-FILTER-X")
-        $:GPU_WAIT()
         call s_lso_filter_ghost_refresh(q_cons_vf, 1)
         do ipass = 1, lso_n_passes_x
             c0 = lso_a_x(1, ipass)
@@ -240,7 +239,6 @@ contains
                 $:END_GPU_PARALLEL_LOOP()
             end do
             if (ipass < lso_n_passes_x) then
-                $:GPU_WAIT()
                 call s_lso_filter_ghost_refresh(q_cons_vf, 1)
             end if
         end do
@@ -249,7 +247,6 @@ contains
         ! y-direction (2D/3D)
         if (n > 0) then
             call nvtxStartRange("LSO-FILTER-Y")
-            $:GPU_WAIT()
             call s_lso_filter_ghost_refresh(q_cons_vf, 2)
             do ipass = 1, lso_n_passes_y
                 c0 = lso_a_y(1, ipass)
@@ -282,7 +279,6 @@ contains
                     $:END_GPU_PARALLEL_LOOP()
                 end do
                 if (ipass < lso_n_passes_y) then
-                    $:GPU_WAIT()
                     call s_lso_filter_ghost_refresh(q_cons_vf, 2)
                 end if
             end do
@@ -292,7 +288,6 @@ contains
         ! z-direction (3D)
         if (p > 0) then
             call nvtxStartRange("LSO-FILTER-Z")
-            $:GPU_WAIT()
             call s_lso_filter_ghost_refresh(q_cons_vf, 3)
             do ipass = 1, lso_n_passes_z
                 c0 = lso_a_z(1, ipass)
@@ -325,7 +320,6 @@ contains
                     $:END_GPU_PARALLEL_LOOP()
                 end do
                 if (ipass < lso_n_passes_z) then
-                    $:GPU_WAIT()
                     call s_lso_filter_ghost_refresh(q_cons_vf, 3)
                 end if
             end do
@@ -917,7 +911,6 @@ contains
         if (bc_x%beg < 0 .and. bc_x%beg /= BC_PERIODIC) j_beg_x = buff_size
         if (bc_x%end < 0 .and. bc_x%end /= BC_PERIODIC) j_end_x = m - buff_size
 
-        $:GPU_WAIT()
         call s_lso_stat_ghost_refresh(1)
         do ipass = 1, lso_n_passes_x
             c0 = lso_a_x(1, ipass)
@@ -951,7 +944,6 @@ contains
                 $:END_GPU_PARALLEL_LOOP()
             end do
             if (ipass < lso_n_passes_x) then
-                $:GPU_WAIT()
                 call s_lso_stat_ghost_refresh(1)
             end if
         end do
@@ -961,7 +953,6 @@ contains
             if (bc_y%beg < 0 .and. bc_y%beg /= BC_PERIODIC) k_beg_y = buff_size
             if (bc_y%end < 0 .and. bc_y%end /= BC_PERIODIC) k_end_y = n - buff_size
 
-            $:GPU_WAIT()
             call s_lso_stat_ghost_refresh(2)
             do ipass = 1, lso_n_passes_y
                 c0 = lso_a_y(1, ipass)
@@ -995,7 +986,6 @@ contains
                     $:END_GPU_PARALLEL_LOOP()
                 end do
                 if (ipass < lso_n_passes_y) then
-                    $:GPU_WAIT()
                     call s_lso_stat_ghost_refresh(2)
                 end if
             end do
@@ -1006,7 +996,6 @@ contains
             if (bc_z%beg < 0 .and. bc_z%beg /= BC_PERIODIC) l_beg_z = buff_size
             if (bc_z%end < 0 .and. bc_z%end /= BC_PERIODIC) l_end_z = p - buff_size
 
-            $:GPU_WAIT()
             call s_lso_stat_ghost_refresh(3)
             do ipass = 1, lso_n_passes_z
                 c0 = lso_a_z(1, ipass)
@@ -1040,7 +1029,6 @@ contains
                     $:END_GPU_PARALLEL_LOOP()
                 end do
                 if (ipass < lso_n_passes_z) then
-                    $:GPU_WAIT()
                     call s_lso_stat_ghost_refresh(3)
                 end if
             end do
