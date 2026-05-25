@@ -1,10 +1,12 @@
-"""LSO (Least-Squares Optimal) variable-weight 9-point filter.
+"""LSO (Least-Squares Optimized) variable-weight 9-point Gaussian filter.
 
-H(xi) = a0 + 2*a1*cos(xi) + 2*a2*cos(2*xi) + 2*a3*cos(3*xi) + 2*a4*cos(4*xi)
-target G(xi) = exp(-0.5 * sigma^2 * xi^2),  sigma = filter_sigma / dx
-normalisation: H(0) = 1.
+LSO denotes the least-squares optimization used to fit repeated 9-point stencils to a
+target Gaussian transfer function.  Each pass has a symmetric FIR response
 
-Per-pass weights are fit by Block Coordinate Descent. See Vanden & Belcourt (1995).
+    H(xi) = a0 + 2*a1*cos(xi) + 2*a2*cos(2*xi) + 2*a3*cos(3*xi) + 2*a4*cos(4*xi),
+
+normalized so H(0) = 1.  Per-pass weights are fitted by block coordinate descent (BCD)
+against G(xi) = exp(-0.5 * sigma^2 * xi^2) with sigma = filter_sigma / dx.
 """
 
 from __future__ import annotations
@@ -26,7 +28,7 @@ def _filter_tf(coeffs: np.ndarray, xi: np.ndarray) -> np.ndarray:
 
 def _taylor_init(sigma_per_pass: float) -> np.ndarray:
     """Taylor-matched initial coefficients for one pass: matches G to O(xi^8)
-    by equating H at xi = 1, 2, 3, 4 with normalisation H(0) = 1."""
+    by equating H at xi = 1, 2, 3, 4 with normalization H(0) = 1."""
     r0 = min(sigma_per_pass, 1.38)
     r02 = r0**2
 
@@ -40,7 +42,7 @@ def _taylor_init(sigma_per_pass: float) -> np.ndarray:
             (m * r02) ** 4 / 384.0,
         ]
         rows.append(row)
-    rows.append([1.0, 2.0, 2.0, 2.0, 2.0])  # normalisation H(0)=1
+    rows.append([1.0, 2.0, 2.0, 2.0, 2.0])  # normalization H(0)=1
 
     A = np.array(rows, dtype=float)
     b = np.array(
@@ -50,7 +52,8 @@ def _taylor_init(sigma_per_pass: float) -> np.ndarray:
     try:
         return np.linalg.solve(A, b)
     except np.linalg.LinAlgError:
-        return np.full(5, 0.2)
+        # Identity pass: H(xi) = 1 everywhere.  Satisfies H(0) = 1.
+        return np.array([1.0, 0.0, 0.0, 0.0, 0.0])
 
 
 def design_lso_filter(

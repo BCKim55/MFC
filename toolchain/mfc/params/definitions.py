@@ -233,13 +233,13 @@ _SIMPLE_DESCS = {
     "coefficient_of_restitution": "Coefficient of restitution for IB collisions",
     "collision_time": "Characteristic collision time for IB collisions",
     "ib_coefficient_of_friction": "Coefficient of friction for IB collisions",
-    # LSO variable-weight filter
-    "lso_filter": "Enable LSO variable-weight Gaussian filter (applied at save steps)",
-    "lso_filter_wrt": "Write LSO-filtered fields with a 'lso_' filename prefix alongside unfiltered data",
-    "filter_sigma": "Target Gaussian filter standard deviation (physical units, same as domain coordinates)",
-    "lso_down_sample_factor": "Stride factor for coarsening the LSO-filtered output grid (1 = no coarsening)",
-    "lso_stat_wrt": "Write LSO-filtered statistical product fields (density-weighted velocities, stresses, heat fluxes) to lso_stat_<t>.dat",
-    "lso_R_gas": "Specific gas constant for ideal-gas temperature T = e_int / (cv * R) used in rho*u*T and heat-flux fields [J/(kg*K)]; default 287.0 (dry air)",
+    # LSO (Least-Squares Optimized) variable-weight Gaussian filter
+    "lso_filter": "Apply a least-squares optimized (LSO) variable-weight Gaussian filter to conserved variables at each save step",
+    "lso_filter_wrt": "Write LSO-filtered fields with an lso_ filename prefix alongside unfiltered data",
+    "filter_sigma": "Target Gaussian filter standard deviation in physical units",
+    "lso_down_sample_factor": "Stride factor for coarsening the filtered output grid (1 = no coarsening)",
+    "lso_stat_wrt": "Write filtered statistical fields (volume fraction, momentum, Reynolds stresses, heat fluxes) to lso_stat_<t>.dat",
+    "lso_R_gas": "Specific gas constant [J/(kg·K)] for temperature reconstruction used in stat fields. Default 287.0 (dry air).",
     "acoustic_source": "Enable acoustic sources",
     # Output
     "parallel_io": "Enable parallel I/O",
