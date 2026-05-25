@@ -96,7 +96,7 @@ contains
             & 'cfl_adap_dt', 'cfl_const_dt', 'cfl_dt', 'surface_tension',       &
             & 'shear_stress', 'bulk_stress', 'bubbles_lagrange',                &
             & 'hyperelasticity', 'down_sample', 'fft_wrt', &
-            & 'hyper_cleaning', 'ib_state_wrt', 'lso_filter', 'lso_filter_wrt']
+            & 'hyper_cleaning', 'ib_state_wrt', 'lso_filter', 'lso_filter_wrt', 'lso_stat_wrt']
             call MPI_BCAST(${VAR}$, 1, MPI_LOGICAL, 0, MPI_COMM_WORLD, ierr)
         #:endfor
 
@@ -139,7 +139,7 @@ contains
             & 'tau_star', 'cont_damage_s', 'alpha_bar', 'adap_dt_tol', &
             & 'ic_eps', 'ic_beta', 'hyper_cleaning_speed', &
             & 'hyper_cleaning_tau', 'coefficient_of_restitution', 'collision_time', &
-            & 'ib_coefficient_of_friction', 'filter_sigma' ]
+            & 'ib_coefficient_of_friction', 'filter_sigma', 'lso_R_gas' ]
             call MPI_BCAST(${VAR}$, 1, mpi_p, 0, MPI_COMM_WORLD, ierr)
         #:endfor
 

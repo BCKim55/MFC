@@ -44,7 +44,7 @@ def __profiler_prepend() -> typing.List[str]:
         if not does_command_exist("nsys"):
             raise MFCException("Failed to locate [bold green]NVIDIA Nsight Systems[/bold green] (nsys).")
 
-        return ["nsys", "profile", "--stats=true", "--trace=mpi,nvtx,openacc"] + ARG("nsys")
+        return ["nsys", "profile", "--stats=true", "--trace=nvtx,openacc", "--force-overwrite=true"] + ARG("nsys")
 
     if ARG("rcu") is not None:
         if not does_command_exist("rocprof-compute"):

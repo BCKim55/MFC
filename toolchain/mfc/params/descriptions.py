@@ -257,7 +257,7 @@ DESCRIPTIONS = {
     "ib_coefficient_of_friction": "coefficient of friction used in IB collisions",
     # LSO variable-weight Gaussian filter
     "lso_filter": "Enable LSO variable-weight Gaussian filter applied to conserved variables at each data-save step",
-    "lso_filter_wrt": "Write LSO-filtered fields to a subdirectory (<case_dir>/lso) while writing unfiltered data to the primary output path",
+    "lso_filter_wrt": "Write LSO-filtered fields with an 'lso_' filename prefix alongside unfiltered data in the primary output path",
     "filter_sigma": "Target Gaussian filter standard deviation in physical units (same as domain coordinates)",
     "lso_n_passes_x": "Number of LSO filter passes in x-direction (auto-derived from particle diameter and grid spacing)",
     "lso_n_passes_y": "Number of LSO filter passes in y-direction (auto-derived from particle diameter and grid spacing)",
@@ -266,6 +266,26 @@ DESCRIPTIONS = {
     "lso_a_y": "LSO per-pass 9-point stencil coefficients in y (5 x lso_max_passes, column-major, auto-computed)",
     "lso_a_z": "LSO per-pass 9-point stencil coefficients in z (5 x lso_max_passes, column-major, auto-computed)",
     "lso_down_sample_factor": "Stride factor for coarsening the LSO-filtered output grid (1 = no coarsening). Each direction is sampled every N cells, reducing storage by N^dims.",
+    "lso_stat_wrt": (
+        "Write LSO-filtered statistical product fields "
+        "(particle volume fraction, gas-phase momentum, Reynolds stress tensor, heat fluxes, viscous stress) "
+        "to lso_stat_<t>.dat. Requires lso_filter_wrt=True."
+    ),
+    "lso_R_gas": (
+        "Specific gas constant used to compute temperature from internal energy "
+        "T = e_int / (cv * R) for the rho*u*T and heat-flux stat fields [J/(kg*K)]. "
+        "Default 287.0 (dry air). Only used when lso_stat_wrt=True."
+    ),
+    # LSO post-process filter params
+    "lso_pp_filter": "Apply an additional FIR Gaussian filter in post_process before writing to silo_hdf5_lso/. Requires lso_filter_wrt=True.",
+    "lso_pp_n_passes_x": "Number of post-process LSO filter passes in x-direction",
+    "lso_pp_n_passes_y": "Number of post-process LSO filter passes in y-direction",
+    "lso_pp_n_passes_z": "Number of post-process LSO filter passes in z-direction",
+    "lso_pp_a_x": "Post-process LSO per-pass 9-point stencil coefficients in x (5 x lso_max_passes, column-major)",
+    "lso_pp_a_y": "Post-process LSO per-pass 9-point stencil coefficients in y (5 x lso_max_passes, column-major)",
+    "lso_pp_a_z": "Post-process LSO per-pass 9-point stencil coefficients in z (5 x lso_max_passes, column-major)",
+    "lso_mu": "Dynamic viscosity for viscous stress and heat-flux stat fields [Pa·s]. Set to 0 to skip the viscous pass.",
+    "lso_conductivity": "Thermal conductivity for heat-flux stat fields [W/(m·K)]. Set to 0 to skip the heat-flux pass.",
 }
 
 # Patterns for auto-generating descriptions of indexed parameters

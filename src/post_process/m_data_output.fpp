@@ -15,7 +15,7 @@ module m_data_output
 
     implicit none
 
-    private; public :: s_initialize_data_output_module, s_switch_output_dirs, s_define_output_region, &
+    private; public :: s_initialize_data_output_module, s_switch_output_dirs, s_switch_to_lso_stat_dir, s_define_output_region, &
         & s_open_formatted_database_file, s_open_intf_data_file, s_open_energy_data_file, &
         & s_write_grid_to_formatted_database_file, s_write_variable_to_formatted_database_file, &
         & s_write_lag_bubbles_results_to_text, s_write_lag_bubbles_to_formatted_database_file, s_write_ib_state_files, &
@@ -317,11 +317,8 @@ contains
 
     end subroutine s_initialize_data_output_module
 
-    !> Switch the output directories (proc_rank_dir, rootdir, dbdir) between the LSO-filtered database (silo_hdf5_lso/) and the
-    !! unfiltered database (silo_hdf5/). Directories are created if they do not yet exist. Call with use_lso=.false. before writing
-    !! unfiltered data, then call again with use_lso=.true. to restore the LSO-filtered path.
-    !!
-    !! This is only meaningful for format==1 (Silo-HDF5); binary output is unaffected.
+    !> Point Silo (format == 1) at silo_hdf5_lso/ (use_lso = T) or silo_hdf5/ (use_lso = F), creating the directory on demand. No-op
+    !! for binary output.
     impure subroutine s_switch_output_dirs(use_lso)
 
         logical, intent(in)                  :: use_lso
@@ -355,6 +352,36 @@ contains
         end if
 
     end subroutine s_switch_output_dirs
+
+    !> Point Silo at silo_hdf5_lso_stat/ for LSO stat output.
+    impure subroutine s_switch_to_lso_stat_dir
+
+        character(LEN=path_len + 3*name_len) :: file_loc
+        logical                              :: dir_check
+
+        if (format == 1) then
+            dbdir = trim(case_dir) // '/silo_hdf5_lso_stat'
+
+            write (proc_rank_dir, '(A,I0)') '/p', proc_rank
+            proc_rank_dir = trim(dbdir) // trim(proc_rank_dir)
+
+            file_loc = trim(proc_rank_dir) // '/.'
+            call my_inquire(file_loc, dir_check)
+            if (dir_check .neqv. .true.) then
+                call s_create_directory(trim(proc_rank_dir))
+            end if
+
+            if (proc_rank == 0) then
+                rootdir = trim(dbdir) // '/root'
+                file_loc = trim(rootdir) // '/.'
+                call my_inquire(file_loc, dir_check)
+                if (dir_check .neqv. .true.) then
+                    call s_create_directory(trim(rootdir))
+                end if
+            end if
+        end if
+
+    end subroutine s_switch_to_lso_stat_dir
 
     !> Compute the cell-index bounds for the user-specified partial output domain in each coordinate direction.
     impure subroutine s_define_output_region

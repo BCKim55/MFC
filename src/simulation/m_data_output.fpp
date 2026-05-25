@@ -26,7 +26,7 @@ module m_data_output
     public :: s_initialize_data_output_module, s_open_run_time_information_file, s_open_com_files, s_open_probe_files, &
         & s_write_run_time_information, s_write_data_files, s_write_serial_data_files, s_write_parallel_data_files, &
         & s_write_ib_data_file, s_write_com_files, s_write_probe_files, s_write_ib_state_file, s_close_run_time_information_file, &
-        & s_close_com_files, s_close_probe_files, s_finalize_data_output_module
+        & s_close_com_files, s_close_probe_files, s_finalize_data_output_module, s_write_lso_stat_file
 
     real(wp), allocatable, dimension(:,:,:)       :: icfl_sf  !< ICFL stability criterion
     real(wp), allocatable, dimension(:,:,:)       :: vcfl_sf  !< VCFL stability criterion
@@ -1783,5 +1783,108 @@ contains
         end if
 
     end subroutine s_finalize_data_output_module
+
+    !> Write n_stat LSO stat fields to lso_stat_<t_step>.dat via MPI-IO. Caller passes either q_lso_stat_vf or its stride-sampled
+    !! twin q_lso_stat_ds_vf.
+    impure subroutine s_write_lso_stat_file(q_stat_vf, n_stat, t_step)
+
+        type(scalar_field), intent(in) :: q_stat_vf(:)
+        integer, intent(in)            :: n_stat, t_step
+
+#ifdef MFC_MPI
+        integer                              :: ifile, ierr, data_size, i, j, k, l
+        integer, dimension(MPI_STATUS_SIZE)  :: status
+        integer(kind=MPI_OFFSET_kind)        :: disp
+        integer(kind=MPI_OFFSET_kind)        :: m_MOK, n_MOK, p_MOK
+        integer(kind=MPI_OFFSET_kind)        :: WP_MOK, var_MOK, MOK
+        integer, dimension(num_dims)         :: sizes_glb, sizes_loc, start_stat
+        integer                              :: mpi_view
+        integer                              :: m_loc, n_loc, p_loc
+        real(stp), allocatable               :: stat_io_buf(:,:,:)
+        character(LEN=path_len + 2*name_len) :: file_loc
+        logical                              :: file_exist
+
+        if (lso_down_sample_factor > 1) then
+            m_loc = m_lso_ds; n_loc = n_lso_ds; p_loc = p_lso_ds
+            sizes_glb(1) = m_glb_lso_ds + 1
+            sizes_loc(1) = m_lso_ds + 1
+            start_stat(1) = start_idx(1)/lso_down_sample_factor
+            if (num_dims >= 2) then
+                sizes_glb(2) = n_glb_lso_ds + 1
+                sizes_loc(2) = n_lso_ds + 1
+                start_stat(2) = start_idx(2)/lso_down_sample_factor
+            end if
+            if (num_dims == 3) then
+                sizes_glb(3) = p_glb_lso_ds + 1
+                sizes_loc(3) = p_lso_ds + 1
+                start_stat(3) = start_idx(3)/lso_down_sample_factor
+            end if
+            data_size = (m_lso_ds + 1)*(n_lso_ds + 1)*(p_lso_ds + 1)
+            m_MOK = int(m_glb_lso_ds + 1, MPI_OFFSET_KIND)
+            n_MOK = int(n_glb_lso_ds + 1, MPI_OFFSET_KIND)
+            p_MOK = int(p_glb_lso_ds + 1, MPI_OFFSET_KIND)
+        else
+            m_loc = m; n_loc = n; p_loc = p
+            sizes_glb(1) = m_glb + 1
+            sizes_loc(1) = m + 1
+            start_stat(1) = start_idx(1)
+            if (num_dims >= 2) then
+                sizes_glb(2) = n_glb + 1
+                sizes_loc(2) = n + 1
+                start_stat(2) = start_idx(2)
+            end if
+            if (num_dims == 3) then
+                sizes_glb(3) = p_glb + 1
+                sizes_loc(3) = p + 1
+                start_stat(3) = start_idx(3)
+            end if
+            data_size = (m + 1)*(n + 1)*(p + 1)
+            m_MOK = int(m_glb + 1, MPI_OFFSET_KIND)
+            n_MOK = int(n_glb + 1, MPI_OFFSET_KIND)
+            p_MOK = int(p_glb + 1, MPI_OFFSET_KIND)
+        end if
+
+        WP_MOK = int(storage_size(0._stp)/8, MPI_OFFSET_KIND)
+        MOK = int(1._wp, MPI_OFFSET_KIND)
+
+        write (file_loc, '(A,I0,A)') 'lso_stat_', t_step, '.dat'
+        file_loc = trim(case_dir) // '/restart_data' // trim(mpiiofs) // trim(file_loc)
+        inquire (FILE=trim(file_loc), EXIST=file_exist)
+        if (file_exist .and. proc_rank == 0) then
+            call MPI_FILE_DELETE(file_loc, mpi_info_int, ierr)
+        end if
+        call MPI_FILE_OPEN(MPI_COMM_WORLD, file_loc, ior(MPI_MODE_WRONLY, MPI_MODE_CREATE), mpi_info_int, ifile, ierr)
+
+        ! Funnel the interior block through a contiguous buffer so the write doesn't
+        ! pick up ghost cells when q_stat_vf is allocated with full bounds.
+        allocate (stat_io_buf(0:m_loc,0:n_loc,0:p_loc))
+
+        do i = 1, n_stat
+            do l = 0, p_loc
+                do k = 0, n_loc
+                    do j = 0, m_loc
+                        stat_io_buf(j, k, l) = q_stat_vf(i)%sf(j, k, l)
+                    end do
+                end do
+            end do
+
+            call MPI_TYPE_CREATE_SUBARRAY(num_dims, sizes_glb, sizes_loc, start_stat, MPI_ORDER_FORTRAN, mpi_p, mpi_view, ierr)
+            call MPI_TYPE_COMMIT(mpi_view, ierr)
+
+            var_MOK = int(i, MPI_OFFSET_KIND)
+            disp = m_MOK*max(MOK, n_MOK)*max(MOK, p_MOK)*WP_MOK*(var_MOK - 1)
+
+            call MPI_FILE_SET_VIEW(ifile, disp, mpi_p, mpi_view, 'native', mpi_info_int, ierr)
+            call MPI_FILE_WRITE_ALL(ifile, stat_io_buf, data_size*mpi_io_type, mpi_io_p, status, ierr)
+
+            call MPI_TYPE_FREE(mpi_view, ierr)
+        end do
+
+        deallocate (stat_io_buf)
+
+        call MPI_FILE_CLOSE(ifile, ierr)
+#endif
+
+    end subroutine s_write_lso_stat_file
 
 end module m_data_output

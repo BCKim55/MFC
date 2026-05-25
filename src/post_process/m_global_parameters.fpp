@@ -185,9 +185,9 @@ module m_global_parameters
     logical, dimension(3) :: flux_wrt
     logical :: E_wrt
     logical, dimension(num_fluids_max) :: alpha_rho_e_wrt
-    logical                            :: fft_wrt
-    logical                            :: dummy   !< AMDFlang workaround for case-optimization + GPU-kernel bug
-    logical                            :: pres_wrt
+    logical :: fft_wrt
+    logical :: dummy  !< AMDFlang workaround for case-optimization + GPU-kernel bug
+    logical :: pres_wrt
     logical, dimension(num_fluids_max) :: alpha_wrt
     logical :: gamma_wrt
     logical :: heat_ratio_wrt
@@ -203,8 +203,35 @@ module m_global_parameters
     logical :: cf_wrt
     logical :: ib
     logical :: ib_state_wrt
-    logical :: lso_filter_wrt          !< Read LSO-filtered restart data (lustre_lso_*.dat) and write to silo_hdf5_lso/
+    logical :: lso_filter_wrt  !< Read LSO-filtered restart data (lustre_lso_*.dat) and write to silo_hdf5_lso/
     integer :: lso_down_sample_factor  !< Stride factor used when writing LSO-filtered output (1 = no coarsening)
+    logical :: lso_stat_wrt  !< Read lso_stat_<t>.dat and write statistical product fields to silo_hdf5_lso_stat/
+    integer :: n_lso_stat  !< Total number of LSO statistical variables (9/19/31 for 1D/2D/3D)
+    integer :: lso_stat_phi_p_beg, lso_stat_phi_p_end  !< phi_p: particle indicator
+    integer :: lso_stat_up_beg, lso_stat_up_end  !< phi_p * u_p: particle velocity flux
+    integer :: lso_stat_rhou_beg, lso_stat_rhou_end  !< gas rho*u
+    integer :: lso_stat_rhouu_beg, lso_stat_rhouu_end  !< gas rho*u*u symmetric tensor
+    integer :: lso_stat_rhoke_beg, lso_stat_rhoke_end  !< gas rho*u*|u|^2
+    integer :: lso_stat_rhouT_beg, lso_stat_rhouT_end  !< gas rho*u*T
+    integer :: lso_stat_tau_beg, lso_stat_tau_end  !< viscous stress tau_ij
+    integer :: lso_stat_q_beg, lso_stat_q_end  !< heat flux q_i
+    integer :: lso_stat_rhotau_u_beg, lso_stat_rhotau_u_end  !< viscous power flux (tau*u)_i
+
+    !> @name LSO post-process Gaussian FIR filter
+    !> @{
+    integer, parameter :: lso_max_passes = 60  !< Maximum number of filter passes (must match Python LSO_MAX_PASSES)
+    logical            :: lso_pp_filter  !< Apply additional FIR filter in post_process before writing silo_hdf5_lso/
+    integer            :: lso_pp_n_passes_x  !< Number of post-process filter passes in x
+    integer            :: lso_pp_n_passes_y  !< Number of post-process filter passes in y
+    integer            :: lso_pp_n_passes_z  !< Number of post-process filter passes in z
+    real(wp)           :: lso_pp_a_x(5, lso_max_passes)  !< Per-pass stencil coefficients in x
+    real(wp)           :: lso_pp_a_y(5, lso_max_passes)  !< Per-pass stencil coefficients in y
+    real(wp)           :: lso_pp_a_z(5, lso_max_passes)  !< Per-pass stencil coefficients in z
+    real(wp)           :: lso_R_gas  !< Specific gas constant [J/(kg*K)] for temperature (default 287.0 = air)
+    real(wp)           :: lso_mu  !< Dynamic viscosity for viscous stat pass (0 = skip)
+    real(wp)           :: lso_conductivity  !< Thermal conductivity for heat flux stat pass (0 = skip)
+    !> @}
+
     logical :: chem_wrt_Y(1:num_species)
     logical :: chem_wrt_T
     logical :: lag_header
@@ -418,6 +445,27 @@ contains
         ib_state_wrt = .false.
         lso_filter_wrt = .false.
         lso_down_sample_factor = 1
+        lso_stat_wrt = .false.
+        n_lso_stat = 0
+        lso_stat_phi_p_beg = 0; lso_stat_phi_p_end = 0
+        lso_stat_up_beg = 0; lso_stat_up_end = 0
+        lso_stat_rhou_beg = 0; lso_stat_rhou_end = 0
+        lso_stat_rhouu_beg = 0; lso_stat_rhouu_end = 0
+        lso_stat_rhoke_beg = 0; lso_stat_rhoke_end = 0
+        lso_stat_rhouT_beg = 0; lso_stat_rhouT_end = 0
+        lso_stat_tau_beg = 0; lso_stat_tau_end = 0
+        lso_stat_q_beg = 0; lso_stat_q_end = 0
+        lso_stat_rhotau_u_beg = 0; lso_stat_rhotau_u_end = 0
+        lso_pp_filter = .false.
+        lso_pp_n_passes_x = 0
+        lso_pp_n_passes_y = 0
+        lso_pp_n_passes_z = 0
+        lso_pp_a_x = 0.0_wp
+        lso_pp_a_y = 0.0_wp
+        lso_pp_a_z = 0.0_wp
+        lso_R_gas = 287.0_wp
+        lso_mu = 0.0_wp
+        lso_conductivity = 0.0_wp
         lag_txt_wrt = .false.
         lag_header = .true.
         lag_db_wrt = .false.

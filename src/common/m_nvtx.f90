@@ -27,7 +27,7 @@ module m_nvtx
         type(c_ptr)        :: message          !< ascii char
     end type nvtxEventAttributes
 
-#if defined(MFC_GPU) && defined(__PGI)
+#if defined(MFC_GPU) && (defined(__PGI) || defined(__NVCOMPILER))
     interface nvtxRangePush
         ! push range with custom label and standard color
         subroutine nvtxRangePushA(name) bind(C, name='nvtxRangePushA')
@@ -53,7 +53,7 @@ module m_nvtx
 
         end subroutine nvtxRangePop
     end interface nvtxRangePop
-#endif
+#endif  /* MFC_GPU && (__PGI || __NVCOMPILER) */
 
 contains
 
@@ -64,7 +64,7 @@ contains
         integer, intent(in), optional             :: id
         type(nvtxEventAttributes)                 :: event
 
-#if defined(MFC_GPU) && defined(__PGI)
+#if defined(MFC_GPU) && (defined(__PGI) || defined(__NVCOMPILER))
         tempName = trim(name) // c_null_char
 
         if (.not. present(id)) then
@@ -81,7 +81,7 @@ contains
     !> Pop the current NVTX range to end the GPU profiling region.
     subroutine nvtxEndRange
 
-#if defined(MFC_GPU) && defined(__PGI)
+#if defined(MFC_GPU) && (defined(__PGI) || defined(__NVCOMPILER))
         call nvtxRangePop
 #endif
 

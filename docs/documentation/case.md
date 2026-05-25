@@ -655,8 +655,10 @@ To restart the simulation from $k$-th time step, see @ref running "Restarting Ca
 | `chem_wrt_T`            | Logical | Write temperature field for chemistry output |
 | `fft_wrt`               | Logical | Enable FFT output |
 | `lso_filter`            | Logical | Enable LSO variable-weight Gaussian filter applied to conserved variables at each data-save step |
-| `lso_filter_wrt`        | Logical | Write LSO-filtered fields to `<case_dir>/lso/`; unfiltered data written to the primary output path |
+| `lso_filter_wrt`        | Logical | Write LSO-filtered fields with an "lso_" filename prefix alongside unfiltered data in the primary output path |
 | `lso_down_sample_factor`| Integer | Stride factor for coarsening the LSO-filtered output grid (1 = no coarsening). Each direction is sampled every N cells, reducing storage by N^dims. |
+| `lso_stat_wrt`          | Logical | Write LSO-filtered statistical product fields (particle volume fraction, gas-phase momentum, Reynolds stress tensor, heat fluxes, viscous stress) to lso_stat_&lt;t&gt;.dat. Requires lso_filter_wrt=True. |
+| `lso_R_gas`             | Real    | Specific gas constant used to compute temperature from internal energy T = e_int / (cv * R) for the rho*u*T and heat-flux stat fields [J/(kg*K)]. Default 287.0 (dry air). Only used when lso_stat_wrt=True. |
 | `filter_sigma`          | Real    | Target Gaussian filter standard deviation in physical units (same as domain coordinates) |
 | `lso_n_passes_x`        | Integer | Number of LSO filter passes in x-direction (auto-derived from particle diameter and grid spacing) |
 | `lso_n_passes_y`        | Integer | Number of LSO filter passes in y-direction (auto-derived from particle diameter and grid spacing) |
@@ -664,6 +666,15 @@ To restart the simulation from $k$-th time step, see @ref running "Restarting Ca
 | `lso_a_x`               | Real    | LSO per-pass stencil coefficients in x (5 x lso_max_passes, auto-computed by toolchain) |
 | `lso_a_y`               | Real    | LSO per-pass stencil coefficients in y (5 x lso_max_passes, auto-computed by toolchain) |
 | `lso_a_z`               | Real    | LSO per-pass stencil coefficients in z (5 x lso_max_passes, auto-computed by toolchain) |
+| `lso_pp_filter`         | Logical | Apply additional FIR Gaussian filter in post_process to conserved variables before writing LSO-filtered Silo output. Requires lso_filter_wrt=True. |
+| `lso_pp_n_passes_x`     | Integer | Number of post-process FIR Gaussian filter passes in x-direction |
+| `lso_pp_n_passes_y`     | Integer | Number of post-process FIR Gaussian filter passes in y-direction |
+| `lso_pp_n_passes_z`     | Integer | Number of post-process FIR Gaussian filter passes in z-direction |
+| `lso_pp_a_x`            | Real    | Post-process FIR Gaussian filter per-pass stencil coefficients in x (5 x lso_max_passes) |
+| `lso_pp_a_y`            | Real    | Post-process FIR Gaussian filter per-pass stencil coefficients in y (5 x lso_max_passes) |
+| `lso_pp_a_z`            | Real    | Post-process FIR Gaussian filter per-pass stencil coefficients in z (5 x lso_max_passes) |
+| `lso_mu`                | Real    | Dynamic viscosity for viscous stress computation in LSO stat fields [Pa*s]. Default 0.0 (inviscid). Only used when lso_stat_wrt=True. |
+| `lso_conductivity`      | Real    | Thermal conductivity for heat-flux stat field computation [W/(m*K)]. Default 0.0 (adiabatic). Only used when lso_stat_wrt=True. |
 | `sim_data`              | Logical | Write interface and energy data files (post_process) |
 | `integral_wrt`          | Logical | Write integral data |
 | `num_integrals`         | Integer | Number of integral regions |

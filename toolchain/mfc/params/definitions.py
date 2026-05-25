@@ -238,6 +238,8 @@ _SIMPLE_DESCS = {
     "lso_filter_wrt": "Write LSO-filtered fields with a 'lso_' filename prefix alongside unfiltered data",
     "filter_sigma": "Target Gaussian filter standard deviation (physical units, same as domain coordinates)",
     "lso_down_sample_factor": "Stride factor for coarsening the LSO-filtered output grid (1 = no coarsening)",
+    "lso_stat_wrt": "Write LSO-filtered statistical product fields (density-weighted velocities, stresses, heat fluxes) to lso_stat_<t>.dat",
+    "lso_R_gas": "Specific gas constant for ideal-gas temperature T = e_int / (cv * R) used in rho*u*T and heat-flux fields [J/(kg*K)]; default 287.0 (dry air)",
     "acoustic_source": "Enable acoustic sources",
     # Output
     "parallel_io": "Enable parallel I/O",
@@ -955,10 +957,20 @@ def _load():
     _r("lso_filter_wrt", LOG, {"filter"})
     _r("filter_sigma", REAL, {"filter"})
     _r("lso_down_sample_factor", INT, {"filter"})
+    _r("lso_stat_wrt", LOG, {"filter"})
+    _r("lso_R_gas", REAL, {"filter"})
     for n in ["lso_n_passes_x", "lso_n_passes_y", "lso_n_passes_z"]:
         _r(n, INT, {"filter"})
     for n in ["lso_a_x", "lso_a_y", "lso_a_z"]:
         _r(n, REAL, {"filter"})
+    # LSO post-process filter params (post_process target only)
+    _r("lso_pp_filter", LOG, {"filter"})
+    for n in ["lso_pp_n_passes_x", "lso_pp_n_passes_y", "lso_pp_n_passes_z"]:
+        _r(n, INT, {"filter"})
+    for n in ["lso_pp_a_x", "lso_pp_a_y", "lso_pp_a_z"]:
+        _r(n, REAL, {"filter"})
+    _r("lso_mu", REAL, {"filter"})
+    _r("lso_conductivity", REAL, {"filter"})
     for n in [
         "schlieren_wrt",
         "alpha_rho_wrt",

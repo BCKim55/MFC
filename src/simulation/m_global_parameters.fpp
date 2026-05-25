@@ -359,18 +359,41 @@ module m_global_parameters
 
     !> @name LSO variable-weight Gaussian filter
     !> @{
-    integer, parameter :: lso_max_passes = 60         !< Maximum number of filter passes (must match Python LSO_MAX_PASSES)
-    logical            :: lso_filter                  !< Enable LSO filter at save steps
-    logical            :: lso_filter_wrt              !< Write filtered fields to a subdirectory (<case_dir>/lso)
-    real(wp)           :: filter_sigma                !< Target Gaussian sigma in physical units
-    integer            :: lso_n_passes_x              !< Number of filter passes in x (derived from d_p/dx)
-    integer            :: lso_n_passes_y              !< Number of filter passes in y (derived from d_p/dy)
-    integer            :: lso_n_passes_z              !< Number of filter passes in z (derived from d_p/dz)
+    integer, parameter :: lso_max_passes = 60  !< Maximum number of filter passes (must match Python LSO_MAX_PASSES)
+    logical            :: lso_filter  !< Enable LSO filter at save steps
+    logical            :: lso_filter_wrt  !< Write filtered fields with an 'lso_' filename prefix alongside unfiltered data
+    real(wp)           :: filter_sigma  !< Target Gaussian sigma in physical units
+    integer            :: lso_n_passes_x  !< Number of filter passes in x (derived from d_p/dx)
+    integer            :: lso_n_passes_y  !< Number of filter passes in y (derived from d_p/dy)
+    integer            :: lso_n_passes_z  !< Number of filter passes in z (derived from d_p/dz)
     real(wp)           :: lso_a_x(5, lso_max_passes)  !< Per-pass stencil coefficients in x
     real(wp)           :: lso_a_y(5, lso_max_passes)  !< Per-pass stencil coefficients in y
     real(wp)           :: lso_a_z(5, lso_max_passes)  !< Per-pass stencil coefficients in z
     $:GPU_DECLARE(create='[lso_filter, lso_n_passes_x, lso_n_passes_y, lso_n_passes_z]')
     $:GPU_DECLARE(create='[lso_a_x, lso_a_y, lso_a_z]')
+    !> @}
+
+    !> @name LSO statistical product fields for LES subgrid modeling
+    !> @{
+    logical :: lso_stat_wrt  !< Enable writing of filtered statistical product fields (phi_p, rho*u, tau, etc.)
+    integer :: n_lso_stat    !< Total number of statistical variables (9 in 1D, 19 in 2D, 31 in 3D)
+    !> Block begin/end indices into q_lso_stat_vf(1:n_lso_stat)
+    integer :: lso_stat_phi_p_beg, lso_stat_phi_p_end  !< phi_p: particle indicator (1 component)
+    integer :: lso_stat_up_beg, lso_stat_up_end        !< phi_p * u_p: particle velocity flux (num_dims components)
+    integer :: lso_stat_rhou_beg, lso_stat_rhou_end    !< gas rho*u (num_dims components)
+    integer :: lso_stat_rhouu_beg, lso_stat_rhouu_end  !< gas rho*u*u symmetric tensor (1/3/6 components)
+    integer :: lso_stat_rhoke_beg, lso_stat_rhoke_end  !< gas rho*u*|u|^2 (num_dims components)
+    integer :: lso_stat_rhouT_beg, lso_stat_rhouT_end  !< gas rho*u*T temperature flux (num_dims components)
+    !> Specific gas constant for ideal-gas temperature T = e_int/(gammas(1)*lso_R_gas) [J/(kg*K)]; default 287.0 (air)
+    real(wp) :: lso_R_gas
+    !> Dynamic viscosity [Pa·s] for the viscous stat pass (tau_ij, tau*u). 0 (default) = skip viscous pass.
+    real(wp) :: lso_mu
+    !> Thermal conductivity [W/(m·K)] for the heat-flux stat pass (q_i, tau*u includes q). 0 (default) = skip heat-flux.
+    real(wp) :: lso_conductivity
+    $:GPU_DECLARE(create='[lso_R_gas, lso_mu, lso_conductivity]')
+    integer :: lso_stat_tau_beg, lso_stat_tau_end            !< viscous stress tau_ij (1/3/6 components)
+    integer :: lso_stat_q_beg, lso_stat_q_end                !< heat flux q_i (num_dims components)
+    integer :: lso_stat_rhotau_u_beg, lso_stat_rhotau_u_end  !< viscous power flux (tau*u)_i (num_dims components)
     !> @}
 
     !> @name Bubble modeling
@@ -673,6 +696,22 @@ contains
         lso_a_x = 0.0_wp
         lso_a_y = 0.0_wp
         lso_a_z = 0.0_wp
+
+        ! LSO statistical product fields
+        lso_stat_wrt = .false.
+        n_lso_stat = 0
+        lso_stat_phi_p_beg = 0; lso_stat_phi_p_end = 0
+        lso_stat_up_beg = 0; lso_stat_up_end = 0
+        lso_stat_rhou_beg = 0; lso_stat_rhou_end = 0
+        lso_stat_rhouu_beg = 0; lso_stat_rhouu_end = 0
+        lso_stat_rhoke_beg = 0; lso_stat_rhoke_end = 0
+        lso_stat_rhouT_beg = 0; lso_stat_rhouT_end = 0
+        lso_R_gas = 287.0_wp
+        lso_mu = 0.0_wp
+        lso_conductivity = 0.0_wp
+        lso_stat_tau_beg = 0; lso_stat_tau_end = 0
+        lso_stat_q_beg = 0; lso_stat_q_end = 0
+        lso_stat_rhotau_u_beg = 0; lso_stat_rhotau_u_end = 0
 
         ! Bubble modeling
         bubbles_euler = .false.

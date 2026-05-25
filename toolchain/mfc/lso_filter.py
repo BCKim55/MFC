@@ -1,23 +1,10 @@
-"""
-LSO (Least-Squares Optimal) variable-weight 9-point filter for MFC.
+"""LSO (Least-Squares Optimal) variable-weight 9-point filter.
 
-Given the particle diameter (d_p), grid spacing (dx/dy/dz), and target
-Gaussian filter width (filter_sigma), this module computes the per-pass
-filter coefficients via Block Coordinate Descent (BCD) optimization and
-returns them ready for insertion into the Fortran namelist.
+H(xi) = a0 + 2*a1*cos(xi) + 2*a2*cos(2*xi) + 2*a3*cos(3*xi) + 2*a4*cos(4*xi)
+target G(xi) = exp(-0.5 * sigma^2 * xi^2),  sigma = filter_sigma / dx
+normalisation: H(0) = 1.
 
-Filter transfer function (9-point symmetric stencil):
-    H(xi) = a0 + 2*a1*cos(xi) + 2*a2*cos(2*xi) + 2*a3*cos(3*xi) + 2*a4*cos(4*xi)
-
-Target (Gaussian in frequency domain):
-    G(xi) = exp(-0.5 * sigma_target^2 * xi^2)
-    where sigma_target = filter_sigma / dx  (in grid-cell units)
-
-Normalisation constraint (mass conservation):
-    H(0) = 1  =>  a0 + 2*(a1 + a2 + a3 + a4) = 1
-
-References:
-    Vanden & Belcourt (1995), BC Kim implementation (2026)
+Per-pass weights are fit by Block Coordinate Descent. See Vanden & Belcourt (1995).
 """
 
 from __future__ import annotations
@@ -26,27 +13,20 @@ from typing import List, Tuple
 
 import numpy as np
 
-# ── tuneable constants (must match Fortran side) ──────────────────────────────
-LSO_MAX_PASSES: int = 60  # upper bound on filter passes; matches lso_max_passes in Fortran
-_CONV_TOL: float = 1e-3  # default frequency-domain L2 convergence tolerance
-_N_XI: int = 600  # quadrature points over [0, pi]
-# ─────────────────────────────────────────────────────────────────────────────
+# Must stay in sync with lso_max_passes in the Fortran side.
+LSO_MAX_PASSES: int = 60
+_CONV_TOL: float = 1e-3
+_N_XI: int = 600
 
 
 def _filter_tf(coeffs: np.ndarray, xi: np.ndarray) -> np.ndarray:
-    """Evaluate the 9-point filter transfer function at wavenumbers xi."""
     a0, a1, a2, a3, a4 = coeffs
     return a0 + 2.0 * a1 * np.cos(xi) + 2.0 * a2 * np.cos(2.0 * xi) + 2.0 * a3 * np.cos(3.0 * xi) + 2.0 * a4 * np.cos(4.0 * xi)
 
 
 def _taylor_init(sigma_per_pass: float) -> np.ndarray:
-    """
-    Compute Taylor-matched initial coefficients for a single pass.
-
-    Solves the 5x5 linear system that matches H(xi) = exp(-r0^2*xi^2/2) to
-    O(xi^8) by equating coefficients at xi = 1, 2, 3, 4 (in normalised units)
-    plus the normalisation constraint H(0) = 1.
-    """
+    """Taylor-matched initial coefficients for one pass: matches G to O(xi^8)
+    by equating H at xi = 1, 2, 3, 4 with normalisation H(0) = 1."""
     r0 = min(sigma_per_pass, 1.38)
     r02 = r0**2
 
@@ -80,23 +60,8 @@ def design_lso_filter(
     n_max: int = 500,
     n_xi: int = _N_XI,
 ) -> List[Tuple[float, ...]]:
-    """
-    Design a variable-weight LSO filter with n_passes passes via BCD.
-
-    Minimises sum_xi (H_1 * H_2 * ... * H_K - G)^2  subject to H_k(0) = 1
-    for each pass k, iterating until the maximum per-pass weight change
-    is below tol_inner.
-
-    Args:
-        sigma_target: Target Gaussian width in grid-cell units (filter_sigma/dx).
-        n_passes:     Number of filter passes.
-        tol_inner:    BCD inner convergence tolerance.
-        n_max:        Maximum BCD iterations.
-        n_xi:         Quadrature points in [0, pi].
-
-    Returns:
-        List of n_passes tuples (a0, a1, a2, a3, a4).
-    """
+    """Block coordinate descent fit of n_passes 9-point filters against
+    the target Gaussian G. Returns n_passes tuples (a0..a4)."""
     xi = np.linspace(0.0, np.pi, n_xi)
     G = np.exp(-0.5 * sigma_target**2 * xi**2)
     Phi = np.column_stack(
@@ -108,7 +73,7 @@ def design_lso_filter(
             2.0 * np.cos(4.0 * xi),
         ]
     )
-    c = np.array([1.0, 2.0, 2.0, 2.0, 2.0])  # H(0)=1 constraint vector
+    c = np.array([1.0, 2.0, 2.0, 2.0, 2.0])  # H(0) = 1
 
     sigma_per_pass = sigma_target / np.sqrt(max(n_passes, 1))
     betas = [_taylor_init(sigma_per_pass).copy() for _ in range(n_passes)]
@@ -144,22 +109,8 @@ def find_min_lso_passes(
     max_passes: int = LSO_MAX_PASSES,
     n_xi: int = _N_XI,
 ) -> Tuple[int, float, List[Tuple[float, ...]]]:
-    """
-    Find the minimum number of passes to achieve conv_tol.
-
-    The error metric is IC-independent (frequency-domain L2):
-        err = sqrt( mean( (H_cum(xi) - G(xi))^2 ) )
-    over xi in [0, pi].
-
-    Args:
-        sigma_target: Target Gaussian width in grid-cell units.
-        conv_tol:     Frequency-domain L2 convergence tolerance.
-        max_passes:   Maximum number of passes to try.
-        n_xi:         Quadrature points.
-
-    Returns:
-        (n_passes, err, coeffs_list)
-    """
+    """Smallest n_passes such that the frequency-domain L2 error
+    sqrt(mean((H_cum - G)^2)) on [0, pi] is below conv_tol."""
     xi = np.linspace(0.0, np.pi, n_xi)
     G = np.exp(-0.5 * sigma_target**2 * xi**2)
 
@@ -187,25 +138,8 @@ def compute_lso_params(
     conv_tol: float = _CONV_TOL,
     max_passes: int = LSO_MAX_PASSES,
 ) -> dict:
-    """
-    Compute all LSO filter parameters from physical simulation inputs.
-
-    This is the main entry point called by case.py when lso_filter = T.
-
-    Args:
-        d_p:          Particle diameter (physical units, same as domain coords).
-        dx, dy, dz:   Grid spacing in each direction (physical units).
-                      Pass dy = 0.0 for 1D simulations (y/z-filter skipped).
-                      Pass dz = 0.0 for 2D simulations (z-filter is skipped).
-        filter_sigma: Target Gaussian filter standard deviation (physical units).
-        conv_tol:     Frequency-domain L2 convergence tolerance.
-        max_passes:   Upper bound on filter passes; must equal LSO_MAX_PASSES.
-
-    Returns:
-        dict with keys:
-            lso_n_passes_x/y/z  (int)
-            lso_a_x/y/z         (list of n_passes tuples of 5 floats)
-    """
+    """Entry point used by case.py. Pass dy = 0 (1D) or dz = 0 (2D) to skip
+    those directions. Returns {lso_n_passes_x/y/z, lso_a_x/y/z}."""
     directions = [("x", dx)]
     if dy > 0.0:
         directions.append(("y", dy))
@@ -214,19 +148,16 @@ def compute_lso_params(
 
     result: dict = {}
     for tag, d in directions:
-        sigma_target = filter_sigma / d  # convert physical -> grid-cell units
+        sigma_target = filter_sigma / d
         n_passes, err, coeffs = find_min_lso_passes(sigma_target, conv_tol=conv_tol, max_passes=max_passes)
         result[f"lso_n_passes_{tag}"] = n_passes
         result[f"lso_a_{tag}"] = coeffs
         n_res = d_p / d
         print(f"  [LSO] {tag}-dir: N_res={n_res:.2f}, sigma_target={sigma_target:.2f} cells, N_passes={n_passes}, L2_err={err:.2e}")
 
-    # For 1D, y-direction uses zero passes and dummy weights
     if dy <= 0.0:
         result["lso_n_passes_y"] = 0
         result["lso_a_y"] = []
-
-    # For 1D/2D, z-direction uses zero passes and dummy weights
     if dz <= 0.0:
         result["lso_n_passes_z"] = 0
         result["lso_a_z"] = []
@@ -235,19 +166,8 @@ def compute_lso_params(
 
 
 def lso_namelist_lines(lso_params: dict) -> str:
-    """
-    Format LSO parameters as Fortran namelist lines.
-
-    The weight array lso_a_x has shape (5, LSO_MAX_PASSES) in Fortran
-    (column-major). We write only the non-zero entries (up to n_passes per
-    direction) to keep the namelist compact; the rest are zero by default.
-
-    Args:
-        lso_params: dict returned by compute_lso_params().
-
-    Returns:
-        Multi-line string ready to be appended to the &user_inputs namelist.
-    """
+    """Format the dict from compute_lso_params() as &user_inputs namelist lines.
+    lso_a_x is shape (5, LSO_MAX_PASSES), column-major, zero-padded."""
     lines = []
 
     for tag in ["x", "y", "z"]:
@@ -257,8 +177,7 @@ def lso_namelist_lines(lso_params: dict) -> str:
         lines.append(f"lso_n_passes_{tag} = {n_passes}")
 
         if n_passes > 0 and coeffs:
-            # Build flat array in Fortran column-major order:
-            # lso_a_x(coeff_idx, pass_idx) with coeff_idx varying fastest
+            # Fortran column-major: coeff index varies fastest.
             flat = []
             for i_pass in range(LSO_MAX_PASSES):
                 for j_coeff in range(5):

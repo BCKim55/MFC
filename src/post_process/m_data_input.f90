@@ -222,11 +222,10 @@ contains
 
         ! When LSO downsampling is active, read the stride-sampled coordinate files written by simulation with the 'lso_' prefix
         ! (lso_x_cb.dat, lso_y_cb.dat, lso_z_cb.dat). These contain the coarsened physical coordinates covering the full domain
-        ! extent with 1/N grid points per direction.
-        ! Pass explicit slices so the dummy `dimension(-1:)` / `dimension(0:)` arguments map to the correct interior indices of the
-        ! actual arrays. Without slicing, when offset_x%beg or buff_size > 0 (i.e. format=1 parallel 3D ranks), Fortran's
-        ! assumed-shape re-mapping shifts the read by that many slots and leaves the last interior cells uninitialized - corrupting
-        ! downstream ghost-cell extrapolation.
+        ! extent with 1/N grid points per direction. Pass explicit slices so the dummy `dimension(-1:)` / `dimension(0:)` arguments
+        ! map to the correct interior indices of the actual arrays. Without slicing, when offset_x%beg or buff_size > 0 (i.e.
+        ! format=1 parallel 3D ranks), Fortran's assumed-shape re-mapping shifts the read by that many slots and leaves the last
+        ! interior cells uninitialized - corrupting downstream ghost-cell extrapolation.
         if (lso_filter_wrt .and. lso_down_sample_factor > 1) then
             call s_read_grid_data_direction(t_step_dir, 'x', x_cb(-1:m), dx(0:m), x_cc(0:m), m, 'lso_')
 

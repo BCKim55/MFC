@@ -8,6 +8,8 @@ program p_main
     use m_global_parameters
     use m_start_up
     use m_data_output, only: s_switch_output_dirs
+    use m_data_input, only: q_cons_vf
+    use m_lso_pp_filter, only: s_apply_lso_pp_filter
 
     implicit none
 
@@ -43,6 +45,10 @@ program p_main
         ! Primary pass: read (LSO-filtered when lso_filter_wrt=T) and write.
         call s_perform_time_step(t_step)
 
+        ! Post-process FIR filter: apply to conserved variables in-place before writing.
+        ! Requires lso_filter_wrt=T so s_save_data routes output to silo_hdf5_lso/.
+        if (lso_pp_filter) call s_apply_lso_pp_filter(q_cons_vf)
+
         call s_save_data(t_step, varname, pres, c, H)
 
         ! Secondary pass: when lso_filter_wrt=T, also write the unfiltered data to silo_hdf5/. Grid files are NOT re-opened
@@ -57,6 +63,11 @@ program p_main
             call s_save_data(t_step, varname, pres, c, H)
             call s_switch_output_dirs(.true.)
             lso_filter_wrt = .true.
+        end if
+
+        ! Third pass: read lso_stat binary and write statistical product fields to silo_hdf5_lso_stat/.
+        if (lso_filter_wrt .and. lso_stat_wrt) then
+            call s_save_lso_stat_data(t_step)
         end if
 
         call cpu_time(finish)

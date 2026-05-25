@@ -26,6 +26,7 @@ module m_start_up
     use m_thermochem, only: num_species, species_names
     use m_finite_differences
     use m_chemistry
+    use m_lso_pp_filter
 
 #ifdef MFC_MPI
     use mpi
@@ -71,7 +72,8 @@ contains
             & igr_order, down_sample, recon_type, muscl_order, lag_header, lag_txt_wrt, lag_db_wrt, lag_id_wrt, lag_pos_wrt, &
             & lag_pos_prev_wrt, lag_vel_wrt, lag_rad_wrt, lag_rvel_wrt, lag_r0_wrt, lag_rmax_wrt, lag_rmin_wrt, lag_dphidt_wrt, &
             & lag_pres_wrt, lag_mv_wrt, lag_mg_wrt, lag_betaT_wrt, lag_betaC_wrt, alpha_rho_e_wrt, ib_state_wrt, lso_filter_wrt, &
-            & lso_down_sample_factor
+            & lso_down_sample_factor, lso_stat_wrt, lso_pp_filter, lso_pp_n_passes_x, lso_pp_n_passes_y, lso_pp_n_passes_z, &
+            & lso_pp_a_x, lso_pp_a_y, lso_pp_a_z, lso_R_gas, lso_mu, lso_conductivity
 
         file_loc = 'post_process.inp'
         inquire (FILE=trim(file_loc), EXIST=file_check)
@@ -97,13 +99,75 @@ contains
                 p = int((p + 1)/3) - 1
             end if
 
-            ! When reading LSO-filtered output that was saved on a coarser grid, adjust the grid dimensions. The secondary
-            ! (unfiltered) pass is not supported in this mode; run post_process again with lso_filter_wrt = .false. to process the
-            ! unfiltered data at full resolution.
+            ! LSO-filtered output saved on a coarser grid: shrink m/n/p to match the file.
             if (lso_filter_wrt .and. lso_down_sample_factor > 1) then
                 m = int((m + 1)/lso_down_sample_factor) - 1
                 if (n > 0) n = int((n + 1)/lso_down_sample_factor) - 1
                 if (p > 0) p = int((p + 1)/lso_down_sample_factor) - 1
+            end if
+
+            ! LSO stat index layout (same as simulation). num_dims is not set yet, so derive a local dim count from m/n/p.
+            if (lso_filter_wrt .and. lso_stat_wrt) then
+                block
+                    integer :: loc_num_dims
+                    loc_num_dims = 1 + min(1, n) + min(1, p)
+                    lso_stat_phi_p_beg = 1; lso_stat_phi_p_end = 1
+                    lso_stat_up_beg = lso_stat_phi_p_end + 1
+                    lso_stat_up_end = lso_stat_up_beg + loc_num_dims - 1
+                    lso_stat_rhou_beg = lso_stat_up_end + 1
+                    lso_stat_rhou_end = lso_stat_rhou_beg + loc_num_dims - 1
+                    lso_stat_rhouu_beg = lso_stat_rhou_end + 1
+                    if (loc_num_dims == 1) then
+                        lso_stat_rhouu_end = lso_stat_rhouu_beg
+                    else if (loc_num_dims == 2) then
+                        lso_stat_rhouu_end = lso_stat_rhouu_beg + 2
+                    else
+                        lso_stat_rhouu_end = lso_stat_rhouu_beg + 5
+                    end if
+                    lso_stat_rhoke_beg = lso_stat_rhouu_end + 1
+                    lso_stat_rhoke_end = lso_stat_rhoke_beg + loc_num_dims - 1
+                    lso_stat_rhouT_beg = lso_stat_rhoke_end + 1
+                    lso_stat_rhouT_end = lso_stat_rhouT_beg + loc_num_dims - 1
+                    lso_stat_tau_beg = lso_stat_rhouT_end + 1
+                    lso_stat_tau_end = lso_stat_tau_beg + (lso_stat_rhouu_end - lso_stat_rhouu_beg)
+                    lso_stat_q_beg = lso_stat_tau_end + 1
+                    lso_stat_q_end = lso_stat_q_beg + loc_num_dims - 1
+                    lso_stat_rhotau_u_beg = lso_stat_q_end + 1
+                    lso_stat_rhotau_u_end = lso_stat_rhotau_u_beg + loc_num_dims - 1
+                    n_lso_stat = lso_stat_rhotau_u_end
+                end block
+            end if
+
+            ! Same layout for the post_process filter path.
+            if (lso_pp_filter .and. lso_stat_wrt) then
+                block
+                    integer :: loc_num_dims
+                    loc_num_dims = 1 + min(1, n) + min(1, p)
+                    lso_stat_phi_p_beg = 1; lso_stat_phi_p_end = 1
+                    lso_stat_up_beg = lso_stat_phi_p_end + 1
+                    lso_stat_up_end = lso_stat_up_beg + loc_num_dims - 1
+                    lso_stat_rhou_beg = lso_stat_up_end + 1
+                    lso_stat_rhou_end = lso_stat_rhou_beg + loc_num_dims - 1
+                    lso_stat_rhouu_beg = lso_stat_rhou_end + 1
+                    if (loc_num_dims == 1) then
+                        lso_stat_rhouu_end = lso_stat_rhouu_beg
+                    else if (loc_num_dims == 2) then
+                        lso_stat_rhouu_end = lso_stat_rhouu_beg + 2
+                    else
+                        lso_stat_rhouu_end = lso_stat_rhouu_beg + 5
+                    end if
+                    lso_stat_rhoke_beg = lso_stat_rhouu_end + 1
+                    lso_stat_rhoke_end = lso_stat_rhoke_beg + loc_num_dims - 1
+                    lso_stat_rhouT_beg = lso_stat_rhoke_end + 1
+                    lso_stat_rhouT_end = lso_stat_rhouT_beg + loc_num_dims - 1
+                    lso_stat_tau_beg = lso_stat_rhouT_end + 1
+                    lso_stat_tau_end = lso_stat_tau_beg + (lso_stat_rhouu_end - lso_stat_rhouu_beg)
+                    lso_stat_q_beg = lso_stat_tau_end + 1
+                    lso_stat_q_end = lso_stat_q_beg + loc_num_dims - 1
+                    lso_stat_rhotau_u_beg = lso_stat_q_end + 1
+                    lso_stat_rhotau_u_end = lso_stat_rhotau_u_beg + loc_num_dims - 1
+                    n_lso_stat = lso_stat_rhotau_u_end
+                end block
             end if
 
             m_glb = m
@@ -788,6 +852,267 @@ contains
 
     end subroutine s_save_data
 
+    !> Read lso_stat_<t_step>.dat (n_stat MPI-IO subarrays back-to-back) into q_stat_vf. Sets found = .false. when the file is
+    !! missing.
+    impure subroutine s_read_lso_stat_file(q_stat_vf, n_stat, t_step, found)
+
+        type(scalar_field), intent(inout) :: q_stat_vf(:)
+        integer, intent(in)               :: n_stat, t_step
+        logical, intent(out)              :: found
+
+#ifdef MFC_MPI
+        integer                              :: ifile, ierr, data_size, i
+        integer, dimension(MPI_STATUS_SIZE)  :: status
+        integer(kind=MPI_OFFSET_KIND)        :: disp
+        integer(kind=MPI_OFFSET_KIND)        :: m_MOK, n_MOK, p_MOK
+        integer(kind=MPI_OFFSET_KIND)        :: WP_MOK, var_MOK, MOK
+        integer, dimension(num_dims)         :: sizes_glb, sizes_loc, start_stat
+        integer                              :: mpi_view
+        character(LEN=path_len + 2*name_len) :: file_loc
+        logical                              :: file_exist
+
+        found = .true.
+
+        sizes_glb(1) = m_glb + 1; sizes_loc(1) = m + 1; start_stat(1) = start_idx(1)
+        if (num_dims >= 2) then
+            sizes_glb(2) = n_glb + 1; sizes_loc(2) = n + 1; start_stat(2) = start_idx(2)
+        end if
+        if (num_dims == 3) then
+            sizes_glb(3) = p_glb + 1; sizes_loc(3) = p + 1; start_stat(3) = start_idx(3)
+        end if
+        data_size = (m + 1)*(n + 1)*(p + 1)
+        m_MOK = int(m_glb + 1, MPI_OFFSET_KIND)
+        n_MOK = int(n_glb + 1, MPI_OFFSET_KIND)
+        p_MOK = int(p_glb + 1, MPI_OFFSET_KIND)
+        WP_MOK = int(storage_size(0._stp)/8, MPI_OFFSET_KIND)
+        MOK = int(1._wp, MPI_OFFSET_KIND)
+
+        write (file_loc, '(A,I0,A)') 'lso_stat_', t_step, '.dat'
+        file_loc = trim(case_dir) // '/restart_data' // trim(mpiiofs) // trim(file_loc)
+        inquire (FILE=trim(file_loc), EXIST=file_exist)
+        if (.not. file_exist) then
+            found = .false.
+            return
+        end if
+        ! MPI_COMM_SELF so ranks open independently (collective open would deadlock if some ranks skip this path).
+        call MPI_FILE_OPEN(MPI_COMM_SELF, file_loc, MPI_MODE_RDONLY, MPI_INFO_NULL, ifile, ierr)
+
+        do i = 1, n_stat
+            call MPI_TYPE_CREATE_SUBARRAY(num_dims, sizes_glb, sizes_loc, start_stat, MPI_ORDER_FORTRAN, mpi_p, mpi_view, ierr)
+            call MPI_TYPE_COMMIT(mpi_view, ierr)
+
+            var_MOK = int(i, MPI_OFFSET_KIND)
+            disp = m_MOK*max(MOK, n_MOK)*max(MOK, p_MOK)*WP_MOK*(var_MOK - 1)
+
+            call MPI_FILE_SET_VIEW(ifile, disp, mpi_p, mpi_view, 'native', MPI_INFO_NULL, ierr)
+            call MPI_FILE_READ(ifile, q_stat_vf(i)%sf, data_size*mpi_io_type, mpi_io_p, status, ierr)
+
+            call MPI_TYPE_FREE(mpi_view, ierr)
+        end do
+
+        call MPI_FILE_CLOSE(ifile, ierr)
+#else
+        found = .true.
+#endif
+
+    end subroutine s_read_lso_stat_file
+
+    !> Read the lso_stat binary for t_step and emit each variable into silo_hdf5_lso_stat/. No-op when the file is missing (e.g.
+    !! step 0 in cfl_dt mode).
+    impure subroutine s_save_lso_stat_data(t_step)
+
+        integer, intent(in)             :: t_step
+        type(scalar_field), allocatable :: q_stat_vf(:)
+        character(LEN=name_len)         :: varname
+        logical                         :: found
+        integer                         :: i
+
+        if (n_lso_stat <= 0) return
+
+        allocate (q_stat_vf(1:n_lso_stat))
+        do i = 1, n_lso_stat
+            allocate (q_stat_vf(i)%sf(0:m,0:n,0:p))
+        end do
+
+        call s_read_lso_stat_file(q_stat_vf, n_lso_stat, t_step, found)
+
+        ! Make `found` agree on every rank (the Silo write path is collective).
+#ifdef MFC_MPI
+        block
+            integer :: found_int, found_min, ierr
+            found_int = merge(1, 0, found)
+            call MPI_ALLREDUCE(found_int, found_min, 1, MPI_INTEGER, MPI_MIN, MPI_COMM_WORLD, ierr)
+            found = (found_min == 1)
+        end block
+#endif
+
+        if (.not. found) then
+            do i = 1, n_lso_stat
+                deallocate (q_stat_vf(i)%sf)
+            end do
+            deallocate (q_stat_vf)
+            return
+        end if
+
+        call s_switch_to_lso_stat_dir()
+        call s_open_formatted_database_file(t_step)
+        call s_write_grid_to_formatted_database_file(t_step)
+
+        ! phi_p
+        varname = 'phi_p'
+        q_sf(0:m,0:n,0:p) = real(q_stat_vf(lso_stat_phi_p_beg)%sf(0:m,0:n,0:p), wp)
+        call s_write_variable_to_formatted_database_file(varname, t_step)
+
+        ! phi_p * u_p
+        varname = 'phi_p_up_x'
+        q_sf(0:m,0:n,0:p) = real(q_stat_vf(lso_stat_up_beg)%sf(0:m,0:n,0:p), wp)
+        call s_write_variable_to_formatted_database_file(varname, t_step)
+        if (num_dims >= 2) then
+            varname = 'phi_p_up_y'
+            q_sf(0:m,0:n,0:p) = real(q_stat_vf(lso_stat_up_beg + 1)%sf(0:m,0:n,0:p), wp)
+            call s_write_variable_to_formatted_database_file(varname, t_step)
+        end if
+        if (num_dims == 3) then
+            varname = 'phi_p_up_z'
+            q_sf(0:m,0:n,0:p) = real(q_stat_vf(lso_stat_up_beg + 2)%sf(0:m,0:n,0:p), wp)
+            call s_write_variable_to_formatted_database_file(varname, t_step)
+        end if
+
+        ! rho*u
+        varname = 'rho_u_x'
+        q_sf(0:m,0:n,0:p) = real(q_stat_vf(lso_stat_rhou_beg)%sf(0:m,0:n,0:p), wp)
+        call s_write_variable_to_formatted_database_file(varname, t_step)
+        if (num_dims >= 2) then
+            varname = 'rho_u_y'
+            q_sf(0:m,0:n,0:p) = real(q_stat_vf(lso_stat_rhou_beg + 1)%sf(0:m,0:n,0:p), wp)
+            call s_write_variable_to_formatted_database_file(varname, t_step)
+        end if
+        if (num_dims == 3) then
+            varname = 'rho_u_z'
+            q_sf(0:m,0:n,0:p) = real(q_stat_vf(lso_stat_rhou_beg + 2)%sf(0:m,0:n,0:p), wp)
+            call s_write_variable_to_formatted_database_file(varname, t_step)
+        end if
+
+        ! rho*u*u upper triangle
+        varname = 'rho_uu_11'
+        q_sf(0:m,0:n,0:p) = real(q_stat_vf(lso_stat_rhouu_beg)%sf(0:m,0:n,0:p), wp)
+        call s_write_variable_to_formatted_database_file(varname, t_step)
+        if (num_dims >= 2) then
+            varname = 'rho_uu_12'
+            q_sf(0:m,0:n,0:p) = real(q_stat_vf(lso_stat_rhouu_beg + 1)%sf(0:m,0:n,0:p), wp)
+            call s_write_variable_to_formatted_database_file(varname, t_step)
+            varname = 'rho_uu_22'
+            q_sf(0:m,0:n,0:p) = real(q_stat_vf(lso_stat_rhouu_beg + 2)%sf(0:m,0:n,0:p), wp)
+            call s_write_variable_to_formatted_database_file(varname, t_step)
+        end if
+        if (num_dims == 3) then
+            varname = 'rho_uu_13'
+            q_sf(0:m,0:n,0:p) = real(q_stat_vf(lso_stat_rhouu_beg + 3)%sf(0:m,0:n,0:p), wp)
+            call s_write_variable_to_formatted_database_file(varname, t_step)
+            varname = 'rho_uu_23'
+            q_sf(0:m,0:n,0:p) = real(q_stat_vf(lso_stat_rhouu_beg + 4)%sf(0:m,0:n,0:p), wp)
+            call s_write_variable_to_formatted_database_file(varname, t_step)
+            varname = 'rho_uu_33'
+            q_sf(0:m,0:n,0:p) = real(q_stat_vf(lso_stat_rhouu_beg + 5)%sf(0:m,0:n,0:p), wp)
+            call s_write_variable_to_formatted_database_file(varname, t_step)
+        end if
+
+        ! rho*u*|u|^2
+        varname = 'rho_ke_x'
+        q_sf(0:m,0:n,0:p) = real(q_stat_vf(lso_stat_rhoke_beg)%sf(0:m,0:n,0:p), wp)
+        call s_write_variable_to_formatted_database_file(varname, t_step)
+        if (num_dims >= 2) then
+            varname = 'rho_ke_y'
+            q_sf(0:m,0:n,0:p) = real(q_stat_vf(lso_stat_rhoke_beg + 1)%sf(0:m,0:n,0:p), wp)
+            call s_write_variable_to_formatted_database_file(varname, t_step)
+        end if
+        if (num_dims == 3) then
+            varname = 'rho_ke_z'
+            q_sf(0:m,0:n,0:p) = real(q_stat_vf(lso_stat_rhoke_beg + 2)%sf(0:m,0:n,0:p), wp)
+            call s_write_variable_to_formatted_database_file(varname, t_step)
+        end if
+
+        ! rho*u*T
+        varname = 'rho_uT_x'
+        q_sf(0:m,0:n,0:p) = real(q_stat_vf(lso_stat_rhouT_beg)%sf(0:m,0:n,0:p), wp)
+        call s_write_variable_to_formatted_database_file(varname, t_step)
+        if (num_dims >= 2) then
+            varname = 'rho_uT_y'
+            q_sf(0:m,0:n,0:p) = real(q_stat_vf(lso_stat_rhouT_beg + 1)%sf(0:m,0:n,0:p), wp)
+            call s_write_variable_to_formatted_database_file(varname, t_step)
+        end if
+        if (num_dims == 3) then
+            varname = 'rho_uT_z'
+            q_sf(0:m,0:n,0:p) = real(q_stat_vf(lso_stat_rhouT_beg + 2)%sf(0:m,0:n,0:p), wp)
+            call s_write_variable_to_formatted_database_file(varname, t_step)
+        end if
+
+        ! tau (same layout as rho_uu)
+        varname = 'tau_11'
+        q_sf(0:m,0:n,0:p) = real(q_stat_vf(lso_stat_tau_beg)%sf(0:m,0:n,0:p), wp)
+        call s_write_variable_to_formatted_database_file(varname, t_step)
+        if (num_dims >= 2) then
+            varname = 'tau_12'
+            q_sf(0:m,0:n,0:p) = real(q_stat_vf(lso_stat_tau_beg + 1)%sf(0:m,0:n,0:p), wp)
+            call s_write_variable_to_formatted_database_file(varname, t_step)
+            varname = 'tau_22'
+            q_sf(0:m,0:n,0:p) = real(q_stat_vf(lso_stat_tau_beg + 2)%sf(0:m,0:n,0:p), wp)
+            call s_write_variable_to_formatted_database_file(varname, t_step)
+        end if
+        if (num_dims == 3) then
+            varname = 'tau_13'
+            q_sf(0:m,0:n,0:p) = real(q_stat_vf(lso_stat_tau_beg + 3)%sf(0:m,0:n,0:p), wp)
+            call s_write_variable_to_formatted_database_file(varname, t_step)
+            varname = 'tau_23'
+            q_sf(0:m,0:n,0:p) = real(q_stat_vf(lso_stat_tau_beg + 4)%sf(0:m,0:n,0:p), wp)
+            call s_write_variable_to_formatted_database_file(varname, t_step)
+            varname = 'tau_33'
+            q_sf(0:m,0:n,0:p) = real(q_stat_vf(lso_stat_tau_beg + 5)%sf(0:m,0:n,0:p), wp)
+            call s_write_variable_to_formatted_database_file(varname, t_step)
+        end if
+
+        ! q_i
+        varname = 'q_x'
+        q_sf(0:m,0:n,0:p) = real(q_stat_vf(lso_stat_q_beg)%sf(0:m,0:n,0:p), wp)
+        call s_write_variable_to_formatted_database_file(varname, t_step)
+        if (num_dims >= 2) then
+            varname = 'q_y'
+            q_sf(0:m,0:n,0:p) = real(q_stat_vf(lso_stat_q_beg + 1)%sf(0:m,0:n,0:p), wp)
+            call s_write_variable_to_formatted_database_file(varname, t_step)
+        end if
+        if (num_dims == 3) then
+            varname = 'q_z'
+            q_sf(0:m,0:n,0:p) = real(q_stat_vf(lso_stat_q_beg + 2)%sf(0:m,0:n,0:p), wp)
+            call s_write_variable_to_formatted_database_file(varname, t_step)
+        end if
+
+        ! (tau u)_i
+        varname = 'rho_tau_u_x'
+        q_sf(0:m,0:n,0:p) = real(q_stat_vf(lso_stat_rhotau_u_beg)%sf(0:m,0:n,0:p), wp)
+        call s_write_variable_to_formatted_database_file(varname, t_step)
+        if (num_dims >= 2) then
+            varname = 'rho_tau_u_y'
+            q_sf(0:m,0:n,0:p) = real(q_stat_vf(lso_stat_rhotau_u_beg + 1)%sf(0:m,0:n,0:p), wp)
+            call s_write_variable_to_formatted_database_file(varname, t_step)
+        end if
+        if (num_dims == 3) then
+            varname = 'rho_tau_u_z'
+            q_sf(0:m,0:n,0:p) = real(q_stat_vf(lso_stat_rhotau_u_beg + 2)%sf(0:m,0:n,0:p), wp)
+            call s_write_variable_to_formatted_database_file(varname, t_step)
+        end if
+
+        call s_close_formatted_database_file()
+
+        ! Restore LSO directory for subsequent passes
+        call s_switch_output_dirs(.true.)
+
+        do i = 1, n_lso_stat
+            deallocate (q_stat_vf(i)%sf)
+        end do
+        deallocate (q_stat_vf)
+
+    end subroutine s_save_lso_stat_data
+
     !> Transpose 3-D complex data from x-pencil to y-pencil layout via MPI_Alltoall.
     subroutine s_mpi_transpose_x2y
 
@@ -891,6 +1216,7 @@ contains
         call s_initialize_data_input_module()
         call s_initialize_derived_variables_module()
         call s_initialize_data_output_module()
+        if (lso_pp_filter) call s_initialize_lso_pp_filter_module()
 
         if (parallel_io .neqv. .true.) then
             s_read_data_files => s_read_serial_data_files
@@ -1078,6 +1404,7 @@ contains
         end if
 #endif
 
+        if (lso_pp_filter) call s_finalize_lso_pp_filter_module()
         call s_finalize_data_output_module()
         call s_finalize_derived_variables_module()
         call s_finalize_data_input_module()

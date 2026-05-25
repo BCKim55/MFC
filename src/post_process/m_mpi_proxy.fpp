@@ -73,7 +73,18 @@ contains
             & 'model_eqns', 'num_fluids', 'bc_x%beg', 'bc_x%end', 'bc_y%beg',  &
             & 'bc_y%end', 'bc_z%beg', 'bc_z%end', 'flux_lim', 'format',        &
             & 'precision', 'fd_order', 'thermal', 'nb', 'relax_model',         &
-            & 'n_start', 'num_ibs', 'muscl_order', 'lso_down_sample_factor' ]
+            & 'n_start', 'num_ibs', 'muscl_order', 'lso_down_sample_factor',   &
+            & 'n_lso_stat',                                                     &
+            & 'lso_stat_phi_p_beg', 'lso_stat_phi_p_end',                      &
+            & 'lso_stat_up_beg', 'lso_stat_up_end',                            &
+            & 'lso_stat_rhou_beg', 'lso_stat_rhou_end',                        &
+            & 'lso_stat_rhouu_beg', 'lso_stat_rhouu_end',                      &
+            & 'lso_stat_rhoke_beg', 'lso_stat_rhoke_end',                      &
+            & 'lso_stat_rhouT_beg', 'lso_stat_rhouT_end',                      &
+            & 'lso_stat_tau_beg', 'lso_stat_tau_end',                          &
+            & 'lso_stat_q_beg', 'lso_stat_q_end',                              &
+            & 'lso_stat_rhotau_u_beg', 'lso_stat_rhotau_u_end',                      &
+            & 'lso_pp_n_passes_x', 'lso_pp_n_passes_y', 'lso_pp_n_passes_z' ]
             call MPI_BCAST(${VAR}$, 1, MPI_INTEGER, 0, MPI_COMM_WORLD, ierr)
         #:endfor
 
@@ -89,7 +100,8 @@ contains
             & 'adv_n', 'ib', 'cfl_adap_dt', 'cfl_const_dt', 'cfl_dt',             &
             & 'surface_tension', 'hyperelasticity', 'bubbles_lagrange',           &
             & 'output_partial_domain', 'relativity', 'cont_damage', 'bc_io',      &
-            & 'down_sample','fft_wrt', 'hyper_cleaning', 'ib_state_wrt', 'lso_filter_wrt']
+            & 'down_sample','fft_wrt', 'hyper_cleaning', 'ib_state_wrt', 'lso_filter_wrt', 'lso_stat_wrt', &
+            & 'lso_pp_filter']
             call MPI_BCAST(${VAR}$, 1, MPI_LOGICAL, 0, MPI_COMM_WORLD, ierr)
         #:endfor
 
@@ -138,6 +150,16 @@ contains
             call MPI_BCAST(${VAR}$, 1, mpi_p, 0, MPI_COMM_WORLD, ierr)
         #:endfor
         call MPI_BCAST(schlieren_alpha(1), num_fluids_max, mpi_p, 0, MPI_COMM_WORLD, ierr)
+
+        ! LSO pp filter physics scalars
+        #:for VAR in ['lso_R_gas', 'lso_mu', 'lso_conductivity']
+            call MPI_BCAST(${VAR}$, 1, mpi_p, 0, MPI_COMM_WORLD, ierr)
+        #:endfor
+
+        ! LSO pp filter coefficient arrays (5 coefficients * lso_max_passes passes per direction)
+        call MPI_BCAST(lso_pp_a_x(1, 1), 5*lso_max_passes, mpi_p, 0, MPI_COMM_WORLD, ierr)
+        call MPI_BCAST(lso_pp_a_y(1, 1), 5*lso_max_passes, mpi_p, 0, MPI_COMM_WORLD, ierr)
+        call MPI_BCAST(lso_pp_a_z(1, 1), 5*lso_max_passes, mpi_p, 0, MPI_COMM_WORLD, ierr)
 #endif
 
     end subroutine s_mpi_bcast_user_inputs

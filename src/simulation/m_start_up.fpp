@@ -115,7 +115,7 @@ contains
             & hyper_cleaning, hyper_cleaning_speed, hyper_cleaning_tau, alf_factor, num_igr_iters, num_igr_warm_start_iters, &
             & int_comp, ic_eps, ic_beta, nv_uvm_out_of_core, nv_uvm_igr_temps_on_gpu, nv_uvm_pref_gpu, down_sample, fft_wrt, &
             & lso_filter, lso_filter_wrt, filter_sigma, lso_down_sample_factor, lso_n_passes_x, lso_n_passes_y, lso_n_passes_z, &
-            & lso_a_x, lso_a_y, lso_a_z
+            & lso_a_x, lso_a_y, lso_a_z, lso_stat_wrt, lso_R_gas, lso_mu, lso_conductivity
 
         inquire (FILE=trim(file_path), EXIST=file_exist)
 
@@ -338,24 +338,7 @@ contains
             p_glb_ds = int((p_glb + 1)/3) - 1
         end if
 
-        if (lso_filter_wrt .and. lso_down_sample_factor > 1) then
-            m_lso_ds = int((m + 1)/lso_down_sample_factor) - 1
-            m_glb_lso_ds = int((m_glb + 1)/lso_down_sample_factor) - 1
-            if (n > 0) then
-                n_lso_ds = int((n + 1)/lso_down_sample_factor) - 1
-                n_glb_lso_ds = int((n_glb + 1)/lso_down_sample_factor) - 1
-            else
-                n_lso_ds = 0
-                n_glb_lso_ds = 0
-            end if
-            if (p > 0) then
-                p_lso_ds = int((p + 1)/lso_down_sample_factor) - 1
-                p_glb_lso_ds = int((p_glb + 1)/lso_down_sample_factor) - 1
-            else
-                p_lso_ds = 0
-                p_glb_lso_ds = 0
-            end if
-        end if
+        ! LSO downsampled grid sizes are set in s_initialize_modules.
 
         if (file_exist) then
             data_size = m_glb + 2
@@ -770,6 +753,7 @@ contains
         integer(kind=8)         :: i, j, k, l
         integer                 :: stor
         integer                 :: save_count
+        character(LEN=path_len) :: orig_case_dir
 
         if (down_sample) then
             call s_populate_variables_buffers(bc_type, q_cons_ts(1)%vf)
@@ -821,22 +805,10 @@ contains
             save_count = t_step
         end if
 
-        ! LSO filter: when lso_filter_wrt is enabled, copy to q_filt_vf and filter the copy, leaving the original data untouched for
-        ! the primary write below. When lso_filter_wrt is disabled, apply the filter in place (legacy behavior) so the primary write
-        ! emits filtered output.
-        if (lso_filter) then
-            if (lso_filter_wrt) then
-                call s_copy_and_apply_lso_filter(q_cons_ts(stor)%vf)
-                $:GPU_WAIT()
-            else
-                call s_apply_lso_filter(q_cons_ts(stor)%vf)
-                $:GPU_WAIT()
-                do i = 1, sys_size
-#ifndef FRONTIER_UNIFIED
-                    $:GPU_UPDATE(host='[q_cons_ts(stor)%vf(i)%sf]')
-#endif
-                end do
-            end if
+        ! Filter the save-copy so the primary write keeps the unfiltered state.
+        if (lso_filter .and. lso_filter_wrt) then
+            call s_copy_and_apply_lso_filter(q_cons_ts(stor)%vf)
+            $:GPU_WAIT()
         end if
 
         if (bubbles_lagrange) then
@@ -856,17 +828,18 @@ contains
         else
             call s_write_data_files(q_cons_ts(stor)%vf, q_T_sf, q_prim_vf, save_count, bc_type)
         end if
-        ! Write LSO-filtered fields with an "lso_" filename prefix (e.g. lso_q_cons_vf1.dat) into the same timestep directory. When
-        ! lso_down_sample_factor > 1, stride-sample q_filt_vf into q_filt_ds_vf and write the coarser grid.
+        ! Write the filtered copy with an "lso_" filename prefix, stride-sampling first when lso_down_sample_factor > 1.
         if (lso_filter .and. lso_filter_wrt) then
-            do i = 1, sys_size
 #ifndef FRONTIER_UNIFIED
+            do i = 1, sys_size
                 $:GPU_UPDATE(host='[q_filt_vf(i)%sf]')
-#endif
             end do
+#endif
             lso_file_prefix = 'lso_'
             if (lso_down_sample_factor > 1) then
+                call nvtxStartRange("LSO-COARSEN")
                 call s_lso_stride_sample(q_filt_vf, q_filt_ds_vf, lso_down_sample_factor)
+                call nvtxEndRange
                 if (bubbles_lagrange) then
                     call s_write_data_files(q_filt_ds_vf, q_T_sf, q_prim_vf, save_count, bc_type, q_beta(1))
                 else
@@ -880,6 +853,34 @@ contains
                 end if
             end if
             lso_file_prefix = ''
+
+            if (lso_stat_wrt .and. n_lso_stat > 0) then
+                if (lso_down_sample_factor > 1) then
+                    call nvtxStartRange("LSO-COARSEN-STAT")
+                    call s_lso_stat_stride_sample()
+                    call nvtxEndRange
+                    call s_write_lso_stat_file(q_lso_stat_ds_vf, n_lso_stat, save_count)
+                else
+                    call s_write_lso_stat_file(q_lso_stat_vf, n_lso_stat, save_count)
+                end if
+            end if
+        end if
+
+        ! Serial/Silo path: also dump the filtered copy under <case_dir>_lso.
+        if (lso_filter .and. lso_filter_wrt .and. .not. parallel_io) then
+            do i = 1, sys_size
+#ifndef FRONTIER_UNIFIED
+                $:GPU_UPDATE(host='[q_filt_vf(i)%sf]')
+#endif
+            end do
+            orig_case_dir = case_dir
+            case_dir = trim(case_dir) // '_lso'
+            if (bubbles_lagrange) then
+                call s_write_data_files(q_filt_vf, q_T_sf, q_prim_vf, save_count, bc_type, q_beta(1))
+            else
+                call s_write_data_files(q_filt_vf, q_T_sf, q_prim_vf, save_count, bc_type)
+            end if
+            case_dir = orig_case_dir
         end if
 
         ! Write IB kinematic state for restart
@@ -928,6 +929,55 @@ contains
 
         ! Compute LSO downsampled grid dimensions now that per-rank m/n/p are known (must be done before
         ! s_initialize_lso_filter_module allocates q_filt_ds_vf)
+        if (lso_filter_wrt .and. lso_down_sample_factor > 1) then
+            m_lso_ds = int((m + 1)/lso_down_sample_factor) - 1
+            m_glb_lso_ds = int((m_glb + 1)/lso_down_sample_factor) - 1
+            if (n > 0) then
+                n_lso_ds = int((n + 1)/lso_down_sample_factor) - 1
+                n_glb_lso_ds = int((n_glb + 1)/lso_down_sample_factor) - 1
+            else
+                n_lso_ds = 0; n_glb_lso_ds = 0
+            end if
+            if (p > 0) then
+                p_lso_ds = int((p + 1)/lso_down_sample_factor) - 1
+                p_glb_lso_ds = int((p_glb + 1)/lso_down_sample_factor) - 1
+            else
+                p_lso_ds = 0; p_glb_lso_ds = 0
+            end if
+        end if
+
+        ! LSO stat index layout. Must run before s_initialize_lso_filter_module.
+        ! Block sizes: phi_p (1), u_p / rho*u / rho*u*|u|^2 / rho*u*T / q / (tau*u)_i
+        ! (num_dims each), rho*u*u and tau (1/3/6 entries in 1D/2D/3D, upper triangle).
+        if (lso_filter_wrt .and. lso_stat_wrt) then
+            lso_stat_phi_p_beg = 1
+            lso_stat_phi_p_end = 1
+            lso_stat_up_beg = lso_stat_phi_p_end + 1
+            lso_stat_up_end = lso_stat_up_beg + num_dims - 1
+            lso_stat_rhou_beg = lso_stat_up_end + 1
+            lso_stat_rhou_end = lso_stat_rhou_beg + num_dims - 1
+            lso_stat_rhouu_beg = lso_stat_rhou_end + 1
+            if (num_dims == 1) then
+                lso_stat_rhouu_end = lso_stat_rhouu_beg
+            else if (num_dims == 2) then
+                lso_stat_rhouu_end = lso_stat_rhouu_beg + 2
+            else
+                lso_stat_rhouu_end = lso_stat_rhouu_beg + 5
+            end if
+            lso_stat_rhoke_beg = lso_stat_rhouu_end + 1
+            lso_stat_rhoke_end = lso_stat_rhoke_beg + num_dims - 1
+            lso_stat_rhouT_beg = lso_stat_rhoke_end + 1
+            lso_stat_rhouT_end = lso_stat_rhouT_beg + num_dims - 1
+            lso_stat_tau_beg = lso_stat_rhouT_end + 1
+            lso_stat_tau_end = lso_stat_tau_beg + (lso_stat_rhouu_end - lso_stat_rhouu_beg)
+            lso_stat_q_beg = lso_stat_tau_end + 1
+            lso_stat_q_end = lso_stat_q_beg + num_dims - 1
+            lso_stat_rhotau_u_beg = lso_stat_q_end + 1
+            lso_stat_rhotau_u_end = lso_stat_rhotau_u_beg + num_dims - 1
+            n_lso_stat = lso_stat_rhotau_u_end
+        end if
+
+        ! Downsampled grid sizes (needed before s_initialize_lso_filter_module).
         if (lso_filter_wrt .and. lso_down_sample_factor > 1) then
             m_lso_ds = int((m + 1)/lso_down_sample_factor) - 1
             m_glb_lso_ds = int((m_glb + 1)/lso_down_sample_factor) - 1
@@ -1184,6 +1234,7 @@ contains
         if (lso_filter) then
             $:GPU_UPDATE(device='[lso_filter, lso_n_passes_x, lso_n_passes_y, lso_n_passes_z]')
             $:GPU_UPDATE(device='[lso_a_x, lso_a_y, lso_a_z]')
+            $:GPU_UPDATE(device='[lso_R_gas, lso_mu, lso_conductivity]')
         end if
 
     end subroutine s_initialize_gpu_vars
