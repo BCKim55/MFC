@@ -88,7 +88,7 @@ contains
                     end do
                 end if
 #ifdef MFC_MPI
-                ! Halo buffers for stat fields — sized for the largest face across all active directions.
+                ! Halo buffers for stat fields - sized for the largest face across all active directions.
                 block
                     integer :: halo_stat_size
                     if (n > 0) then
@@ -1040,7 +1040,7 @@ contains
     end subroutine s_apply_lso_stat_filter
 
     !> Ghost-cell refresh for q_lso_stat_vf in direction mpi_dir (1=x, 2=y, 3=z). Halos are packed on the GPU into buff_stat_*, only
-    !! the small halo buffers are transferred host↔device for MPI, BC_GHOST_EXTRAP / BC_PERIODIC are reapplied on the GPU, and the
+    !! the small halo buffers are transferred host<->device for MPI, BC_GHOST_EXTRAP / BC_PERIODIC are reapplied on the GPU, and the
     !! stat fields never leave device memory.
     impure subroutine s_lso_stat_ghost_refresh(mpi_dir)
 
