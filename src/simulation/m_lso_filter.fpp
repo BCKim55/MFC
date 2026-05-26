@@ -88,8 +88,7 @@ contains
                     end do
                 end if
 #ifdef MFC_MPI
-                ! CPU-only halo buffers sized for n_lso_stat fields. Use the max element
-                ! count across the directions that apply at this dimensionality.
+                ! Halo buffers for stat fields — sized for the largest face across all active directions.
                 block
                     integer :: halo_stat_size
                     if (n > 0) then
@@ -102,8 +101,8 @@ contains
                     else
                         halo_stat_size = buff_size*n_lso_stat - 1
                     end if
-                    allocate (buff_stat_send(0:halo_stat_size))
-                    allocate (buff_stat_recv(0:halo_stat_size))
+                    @:ALLOCATE(buff_stat_send(0:halo_stat_size))
+                    @:ALLOCATE(buff_stat_recv(0:halo_stat_size))
                 end block
 #endif
             end if
@@ -142,8 +141,12 @@ contains
                 end do
                 @:DEALLOCATE(q_lso_stat_vf)
 #ifdef MFC_MPI
-                if (allocated(buff_stat_send)) deallocate (buff_stat_send)
-                if (allocated(buff_stat_recv)) deallocate (buff_stat_recv)
+                if (allocated(buff_stat_send)) then
+                    @:DEALLOCATE(buff_stat_send)
+                end if
+                if (allocated(buff_stat_recv)) then
+                    @:DEALLOCATE(buff_stat_recv)
+                end if
 #endif
             end if
         end if
@@ -1036,9 +1039,9 @@ contains
 
     end subroutine s_apply_lso_stat_filter
 
-    !> Ghost-cell refresh for q_lso_stat_vf in direction mpi_dir (1=x, 2=y, 3=z). Stat fields are pulled to host, exchanged with the
-    !! dedicated buff_stat_* buffers, BC_GHOST_EXTRAP / BC_PERIODIC are reapplied, then pushed back to the device for the next GPU
-    !! pass.
+    !> Ghost-cell refresh for q_lso_stat_vf in direction mpi_dir (1=x, 2=y, 3=z). Halos are packed on the GPU into buff_stat_*, only
+    !! the small halo buffers are transferred host↔device for MPI, BC_GHOST_EXTRAP / BC_PERIODIC are reapplied on the GPU, and the
+    !! stat fields never leave device memory.
     impure subroutine s_lso_stat_ghost_refresh(mpi_dir)
 
         integer, intent(in) :: mpi_dir
@@ -1063,13 +1066,6 @@ contains
             beg_bc = bc_z%beg
             end_bc = bc_z%end
         end select
-
-#ifndef FRONTIER_UNIFIED
-        ! Pull to host for the CPU-side pack.
-        do i = 1, n_lso_stat
-            $:GPU_UPDATE(host='[q_lso_stat_vf(i)%sf]')
-        end do
-#endif
 
 #ifdef MFC_MPI
         ! Manual halo exchange against buff_stat_*. We do not reuse
@@ -1105,6 +1101,7 @@ contains
 
             select case (mpi_dir)
             case (1)
+                $:GPU_PARALLEL_LOOP(collapse=4, private='[i, j, k, l, r]')
                 do l = 0, p
                     do k = 0, n
                         do j = 0, buff_size - 1
@@ -1115,7 +1112,9 @@ contains
                         end do
                     end do
                 end do
+                $:END_GPU_PARALLEL_LOOP()
             case (2)
+                $:GPU_PARALLEL_LOOP(collapse=4, private='[i, j, k, l, r]')
                 do l = 0, p
                     do k = 0, buff_size - 1
                         do j = -buff_size, m + buff_size
@@ -1126,7 +1125,9 @@ contains
                         end do
                     end do
                 end do
+                $:END_GPU_PARALLEL_LOOP()
             case (3)
+                $:GPU_PARALLEL_LOOP(collapse=4, private='[i, j, k, l, r]')
                 do l = 0, buff_size - 1
                     do k = -buff_size, n + buff_size
                         do j = -buff_size, m + buff_size
@@ -1138,13 +1139,21 @@ contains
                         end do
                     end do
                 end do
+                $:END_GPU_PARALLEL_LOOP()
             end select
 
+#ifndef FRONTIER_UNIFIED
+            $:GPU_UPDATE(host='[buff_stat_send]')
+#endif
             call MPI_SENDRECV(buff_stat_send, buffer_count, mpi_p, dst_proc, send_tag, buff_stat_recv, buffer_count, mpi_p, &
                               & src_proc, recv_tag, MPI_COMM_WORLD, MPI_STATUS_IGNORE, ierr)
+#ifndef FRONTIER_UNIFIED
+            $:GPU_UPDATE(device='[buff_stat_recv]')
+#endif
 
             select case (mpi_dir)
             case (1)
+                $:GPU_PARALLEL_LOOP(collapse=4, private='[i, j, k, l, r]')
                 do l = 0, p
                     do k = 0, n
                         do j = -buff_size, -1
@@ -1155,7 +1164,9 @@ contains
                         end do
                     end do
                 end do
+                $:END_GPU_PARALLEL_LOOP()
             case (2)
+                $:GPU_PARALLEL_LOOP(collapse=4, private='[i, j, k, l, r]')
                 do l = 0, p
                     do k = -buff_size, -1
                         do j = -buff_size, m + buff_size
@@ -1166,7 +1177,9 @@ contains
                         end do
                     end do
                 end do
+                $:END_GPU_PARALLEL_LOOP()
             case (3)
+                $:GPU_PARALLEL_LOOP(collapse=4, private='[i, j, k, l, r]')
                 do l = -buff_size, -1
                     do k = -buff_size, n + buff_size
                         do j = -buff_size, m + buff_size
@@ -1178,6 +1191,7 @@ contains
                         end do
                     end do
                 end do
+                $:END_GPU_PARALLEL_LOOP()
             end select
         end if
 
@@ -1194,6 +1208,7 @@ contains
 
             select case (mpi_dir)
             case (1)
+                $:GPU_PARALLEL_LOOP(collapse=4, private='[i, j, k, l, r]')
                 do l = 0, p
                     do k = 0, n
                         do j = 0, buff_size - 1
@@ -1204,7 +1219,9 @@ contains
                         end do
                     end do
                 end do
+                $:END_GPU_PARALLEL_LOOP()
             case (2)
+                $:GPU_PARALLEL_LOOP(collapse=4, private='[i, j, k, l, r]')
                 do l = 0, p
                     do k = 0, buff_size - 1
                         do j = -buff_size, m + buff_size
@@ -1215,7 +1232,9 @@ contains
                         end do
                     end do
                 end do
+                $:END_GPU_PARALLEL_LOOP()
             case (3)
+                $:GPU_PARALLEL_LOOP(collapse=4, private='[i, j, k, l, r]')
                 do l = 0, buff_size - 1
                     do k = -buff_size, n + buff_size
                         do j = -buff_size, m + buff_size
@@ -1227,13 +1246,21 @@ contains
                         end do
                     end do
                 end do
+                $:END_GPU_PARALLEL_LOOP()
             end select
 
+#ifndef FRONTIER_UNIFIED
+            $:GPU_UPDATE(host='[buff_stat_send]')
+#endif
             call MPI_SENDRECV(buff_stat_send, buffer_count, mpi_p, dst_proc, send_tag, buff_stat_recv, buffer_count, mpi_p, &
                               & src_proc, recv_tag, MPI_COMM_WORLD, MPI_STATUS_IGNORE, ierr)
+#ifndef FRONTIER_UNIFIED
+            $:GPU_UPDATE(device='[buff_stat_recv]')
+#endif
 
             select case (mpi_dir)
             case (1)
+                $:GPU_PARALLEL_LOOP(collapse=4, private='[i, j, k, l, r]')
                 do l = 0, p
                     do k = 0, n
                         do j = -buff_size, -1
@@ -1244,7 +1271,9 @@ contains
                         end do
                     end do
                 end do
+                $:END_GPU_PARALLEL_LOOP()
             case (2)
+                $:GPU_PARALLEL_LOOP(collapse=4, private='[i, j, k, l, r]')
                 do l = 0, p
                     do k = -buff_size, -1
                         do j = -buff_size, m + buff_size
@@ -1255,7 +1284,9 @@ contains
                         end do
                     end do
                 end do
+                $:END_GPU_PARALLEL_LOOP()
             case (3)
+                $:GPU_PARALLEL_LOOP(collapse=4, private='[i, j, k, l, r]')
                 do l = -buff_size, -1
                     do k = -buff_size, n + buff_size
                         do j = -buff_size, m + buff_size
@@ -1267,6 +1298,7 @@ contains
                         end do
                     end do
                 end do
+                $:END_GPU_PARALLEL_LOOP()
             end select
         end if
 #endif
@@ -1276,6 +1308,7 @@ contains
         select case (mpi_dir)
         case (1)
             if (beg_bc == BC_GHOST_EXTRAP) then
+                $:GPU_PARALLEL_LOOP(collapse=4, private='[i, j, k, l]')
                 do i = 1, n_lso_stat
                     do l = 0, p
                         do k = 0, n
@@ -1285,7 +1318,9 @@ contains
                         end do
                     end do
                 end do
+                $:END_GPU_PARALLEL_LOOP()
             else if (beg_bc == BC_PERIODIC) then
+                $:GPU_PARALLEL_LOOP(collapse=4, private='[i, j, k, l]')
                 do i = 1, n_lso_stat
                     do l = 0, p
                         do k = 0, n
@@ -1295,8 +1330,10 @@ contains
                         end do
                     end do
                 end do
+                $:END_GPU_PARALLEL_LOOP()
             end if
             if (end_bc == BC_GHOST_EXTRAP) then
+                $:GPU_PARALLEL_LOOP(collapse=4, private='[i, j, k, l]')
                 do i = 1, n_lso_stat
                     do l = 0, p
                         do k = 0, n
@@ -1306,7 +1343,9 @@ contains
                         end do
                     end do
                 end do
+                $:END_GPU_PARALLEL_LOOP()
             else if (end_bc == BC_PERIODIC) then
+                $:GPU_PARALLEL_LOOP(collapse=4, private='[i, j, k, l]')
                 do i = 1, n_lso_stat
                     do l = 0, p
                         do k = 0, n
@@ -1316,9 +1355,11 @@ contains
                         end do
                     end do
                 end do
+                $:END_GPU_PARALLEL_LOOP()
             end if
         case (2)
             if (beg_bc == BC_GHOST_EXTRAP) then
+                $:GPU_PARALLEL_LOOP(collapse=4, private='[i, j, k, l]')
                 do i = 1, n_lso_stat
                     do l = 0, p
                         do k = 1, buff_size
@@ -1328,7 +1369,9 @@ contains
                         end do
                     end do
                 end do
+                $:END_GPU_PARALLEL_LOOP()
             else if (beg_bc == BC_PERIODIC) then
+                $:GPU_PARALLEL_LOOP(collapse=4, private='[i, j, k, l]')
                 do i = 1, n_lso_stat
                     do l = 0, p
                         do k = 1, buff_size
@@ -1338,8 +1381,10 @@ contains
                         end do
                     end do
                 end do
+                $:END_GPU_PARALLEL_LOOP()
             end if
             if (end_bc == BC_GHOST_EXTRAP) then
+                $:GPU_PARALLEL_LOOP(collapse=4, private='[i, j, k, l]')
                 do i = 1, n_lso_stat
                     do l = 0, p
                         do k = 1, buff_size
@@ -1349,7 +1394,9 @@ contains
                         end do
                     end do
                 end do
+                $:END_GPU_PARALLEL_LOOP()
             else if (end_bc == BC_PERIODIC) then
+                $:GPU_PARALLEL_LOOP(collapse=4, private='[i, j, k, l]')
                 do i = 1, n_lso_stat
                     do l = 0, p
                         do k = 1, buff_size
@@ -1359,9 +1406,11 @@ contains
                         end do
                     end do
                 end do
+                $:END_GPU_PARALLEL_LOOP()
             end if
         case (3)
             if (beg_bc == BC_GHOST_EXTRAP) then
+                $:GPU_PARALLEL_LOOP(collapse=4, private='[i, j, k, l]')
                 do i = 1, n_lso_stat
                     do l = 1, buff_size
                         do k = 0, n
@@ -1371,7 +1420,9 @@ contains
                         end do
                     end do
                 end do
+                $:END_GPU_PARALLEL_LOOP()
             else if (beg_bc == BC_PERIODIC) then
+                $:GPU_PARALLEL_LOOP(collapse=4, private='[i, j, k, l]')
                 do i = 1, n_lso_stat
                     do l = 1, buff_size
                         do k = 0, n
@@ -1381,8 +1432,10 @@ contains
                         end do
                     end do
                 end do
+                $:END_GPU_PARALLEL_LOOP()
             end if
             if (end_bc == BC_GHOST_EXTRAP) then
+                $:GPU_PARALLEL_LOOP(collapse=4, private='[i, j, k, l]')
                 do i = 1, n_lso_stat
                     do l = 1, buff_size
                         do k = 0, n
@@ -1392,7 +1445,9 @@ contains
                         end do
                     end do
                 end do
+                $:END_GPU_PARALLEL_LOOP()
             else if (end_bc == BC_PERIODIC) then
+                $:GPU_PARALLEL_LOOP(collapse=4, private='[i, j, k, l]')
                 do i = 1, n_lso_stat
                     do l = 1, buff_size
                         do k = 0, n
@@ -1402,15 +1457,9 @@ contains
                         end do
                     end do
                 end do
+                $:END_GPU_PARALLEL_LOOP()
             end if
         end select
-
-#ifndef FRONTIER_UNIFIED
-        ! Push interior + refreshed ghosts back to device.
-        do i = 1, n_lso_stat
-            $:GPU_UPDATE(device='[q_lso_stat_vf(i)%sf]')
-        end do
-#endif
 
     end subroutine s_lso_stat_ghost_refresh
 
