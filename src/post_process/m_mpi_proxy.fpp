@@ -76,10 +76,12 @@ contains
             & 'n_start', 'num_ibs', 'muscl_order', 'lso_down_sample_factor',   &
             & 'n_lso_stat',                                                     &
             & 'lso_stat_phi_p_beg', 'lso_stat_phi_p_end',                      &
+            & 'lso_stat_rho_beg', 'lso_stat_rho_end',                          &
+            & 'lso_stat_rhoke_beg', 'lso_stat_rhoke_end',                      &
             & 'lso_stat_up_beg', 'lso_stat_up_end',                            &
             & 'lso_stat_rhou_beg', 'lso_stat_rhou_end',                        &
             & 'lso_stat_rhouu_beg', 'lso_stat_rhouu_end',                      &
-            & 'lso_stat_rhoke_beg', 'lso_stat_rhoke_end',                      &
+            & 'lso_stat_rhouke_beg', 'lso_stat_rhouke_end',                    &
             & 'lso_stat_rhouT_beg', 'lso_stat_rhouT_end',                      &
             & 'lso_stat_tau_beg', 'lso_stat_tau_end',                          &
             & 'lso_stat_q_beg', 'lso_stat_q_end',                              &

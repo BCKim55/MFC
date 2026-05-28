@@ -640,8 +640,10 @@ contains
                     e_int = (E_loc - ke)/rho
                     T_loc = e_int/(gammas(1)*lso_R_gas)
 
-                    ! phi_p, u_p
+                    ! phi_p, rho scalar, rhoke scalar, u_p
                     q_lso_stat_vf(lso_stat_phi_p_beg)%sf(j, k, l) = real(phi_p, stp)
+                    q_lso_stat_vf(lso_stat_rho_beg)%sf(j, k, l) = real(gas_mask*rho, stp)
+                    q_lso_stat_vf(lso_stat_rhoke_beg)%sf(j, k, l) = real(gas_mask*(mom1**2 + mom2**2 + mom3**2)/rho, stp)
                     q_lso_stat_vf(lso_stat_up_beg)%sf(j, k, l) = real(phi_p*up1, stp)
                     if (n > 0) q_lso_stat_vf(lso_stat_up_beg + 1)%sf(j, k, l) = real(phi_p*up2, stp)
                     if (p > 0) q_lso_stat_vf(lso_stat_up_beg + 2)%sf(j, k, l) = real(phi_p*up3, stp)
@@ -666,9 +668,9 @@ contains
                     end if
 
                     ! rho*u*|u|^2
-                    q_lso_stat_vf(lso_stat_rhoke_beg)%sf(j, k, l) = real(gas_mask*mom1*(u1**2 + u2**2 + u3**2), stp)
-                    if (n > 0) q_lso_stat_vf(lso_stat_rhoke_beg + 1)%sf(j, k, l) = real(gas_mask*mom2*(u1**2 + u2**2 + u3**2), stp)
-                    if (p > 0) q_lso_stat_vf(lso_stat_rhoke_beg + 2)%sf(j, k, l) = real(gas_mask*mom3*(u1**2 + u2**2 + u3**2), stp)
+                    q_lso_stat_vf(lso_stat_rhouke_beg)%sf(j, k, l) = real(gas_mask*mom1*(u1**2 + u2**2 + u3**2), stp)
+                    if (n > 0) q_lso_stat_vf(lso_stat_rhouke_beg + 1)%sf(j, k, l) = real(gas_mask*mom2*(u1**2 + u2**2 + u3**2), stp)
+                    if (p > 0) q_lso_stat_vf(lso_stat_rhouke_beg + 2)%sf(j, k, l) = real(gas_mask*mom3*(u1**2 + u2**2 + u3**2), stp)
 
                     ! rho*u*T
                     q_lso_stat_vf(lso_stat_rhouT_beg)%sf(j, k, l) = real(gas_mask*mom1*T_loc, stp)

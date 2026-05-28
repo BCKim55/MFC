@@ -112,7 +112,11 @@ contains
                     integer :: loc_num_dims
                     loc_num_dims = 1 + min(1, n) + min(1, p)
                     lso_stat_phi_p_beg = 1; lso_stat_phi_p_end = 1
-                    lso_stat_up_beg = lso_stat_phi_p_end + 1
+                    lso_stat_rho_beg = lso_stat_phi_p_end + 1
+                    lso_stat_rho_end = lso_stat_rho_beg
+                    lso_stat_rhoke_beg = lso_stat_rho_end + 1
+                    lso_stat_rhoke_end = lso_stat_rhoke_beg
+                    lso_stat_up_beg = lso_stat_rhoke_end + 1
                     lso_stat_up_end = lso_stat_up_beg + loc_num_dims - 1
                     lso_stat_rhou_beg = lso_stat_up_end + 1
                     lso_stat_rhou_end = lso_stat_rhou_beg + loc_num_dims - 1
@@ -124,9 +128,9 @@ contains
                     else
                         lso_stat_rhouu_end = lso_stat_rhouu_beg + 5
                     end if
-                    lso_stat_rhoke_beg = lso_stat_rhouu_end + 1
-                    lso_stat_rhoke_end = lso_stat_rhoke_beg + loc_num_dims - 1
-                    lso_stat_rhouT_beg = lso_stat_rhoke_end + 1
+                    lso_stat_rhouke_beg = lso_stat_rhouu_end + 1
+                    lso_stat_rhouke_end = lso_stat_rhouke_beg + loc_num_dims - 1
+                    lso_stat_rhouT_beg = lso_stat_rhouke_end + 1
                     lso_stat_rhouT_end = lso_stat_rhouT_beg + loc_num_dims - 1
                     lso_stat_tau_beg = lso_stat_rhouT_end + 1
                     lso_stat_tau_end = lso_stat_tau_beg + (lso_stat_rhouu_end - lso_stat_rhouu_beg)
@@ -144,7 +148,11 @@ contains
                     integer :: loc_num_dims
                     loc_num_dims = 1 + min(1, n) + min(1, p)
                     lso_stat_phi_p_beg = 1; lso_stat_phi_p_end = 1
-                    lso_stat_up_beg = lso_stat_phi_p_end + 1
+                    lso_stat_rho_beg = lso_stat_phi_p_end + 1
+                    lso_stat_rho_end = lso_stat_rho_beg
+                    lso_stat_rhoke_beg = lso_stat_rho_end + 1
+                    lso_stat_rhoke_end = lso_stat_rhoke_beg
+                    lso_stat_up_beg = lso_stat_rhoke_end + 1
                     lso_stat_up_end = lso_stat_up_beg + loc_num_dims - 1
                     lso_stat_rhou_beg = lso_stat_up_end + 1
                     lso_stat_rhou_end = lso_stat_rhou_beg + loc_num_dims - 1
@@ -156,9 +164,9 @@ contains
                     else
                         lso_stat_rhouu_end = lso_stat_rhouu_beg + 5
                     end if
-                    lso_stat_rhoke_beg = lso_stat_rhouu_end + 1
-                    lso_stat_rhoke_end = lso_stat_rhoke_beg + loc_num_dims - 1
-                    lso_stat_rhouT_beg = lso_stat_rhoke_end + 1
+                    lso_stat_rhouke_beg = lso_stat_rhouu_end + 1
+                    lso_stat_rhouke_end = lso_stat_rhouke_beg + loc_num_dims - 1
+                    lso_stat_rhouT_beg = lso_stat_rhouke_end + 1
                     lso_stat_rhouT_end = lso_stat_rhouT_beg + loc_num_dims - 1
                     lso_stat_tau_beg = lso_stat_rhouT_end + 1
                     lso_stat_tau_end = lso_stat_tau_beg + (lso_stat_rhouu_end - lso_stat_rhouu_beg)
@@ -963,6 +971,16 @@ contains
         q_sf(0:m,0:n,0:p) = real(q_stat_vf(lso_stat_phi_p_beg)%sf(0:m,0:n,0:p), wp)
         call s_write_variable_to_formatted_database_file(varname, t_step)
 
+        ! rho scalar (gas_mask * rho)
+        varname = 'rho'
+        q_sf(0:m,0:n,0:p) = real(q_stat_vf(lso_stat_rho_beg)%sf(0:m,0:n,0:p), wp)
+        call s_write_variable_to_formatted_database_file(varname, t_step)
+
+        ! rhoke scalar (gas_mask * (mom1^2+mom2^2+mom3^2)/rho)
+        varname = 'rho_ke'
+        q_sf(0:m,0:n,0:p) = real(q_stat_vf(lso_stat_rhoke_beg)%sf(0:m,0:n,0:p), wp)
+        call s_write_variable_to_formatted_database_file(varname, t_step)
+
         ! phi_p * u_p
         varname = 'phi_p_up_x'
         q_sf(0:m,0:n,0:p) = real(q_stat_vf(lso_stat_up_beg)%sf(0:m,0:n,0:p), wp)
@@ -1018,17 +1036,17 @@ contains
         end if
 
         ! rho*u*|u|^2
-        varname = 'rho_ke_x'
-        q_sf(0:m,0:n,0:p) = real(q_stat_vf(lso_stat_rhoke_beg)%sf(0:m,0:n,0:p), wp)
+        varname = 'rho_uke_x'
+        q_sf(0:m,0:n,0:p) = real(q_stat_vf(lso_stat_rhouke_beg)%sf(0:m,0:n,0:p), wp)
         call s_write_variable_to_formatted_database_file(varname, t_step)
         if (num_dims >= 2) then
-            varname = 'rho_ke_y'
-            q_sf(0:m,0:n,0:p) = real(q_stat_vf(lso_stat_rhoke_beg + 1)%sf(0:m,0:n,0:p), wp)
+            varname = 'rho_uke_y'
+            q_sf(0:m,0:n,0:p) = real(q_stat_vf(lso_stat_rhouke_beg + 1)%sf(0:m,0:n,0:p), wp)
             call s_write_variable_to_formatted_database_file(varname, t_step)
         end if
         if (num_dims == 3) then
-            varname = 'rho_ke_z'
-            q_sf(0:m,0:n,0:p) = real(q_stat_vf(lso_stat_rhoke_beg + 2)%sf(0:m,0:n,0:p), wp)
+            varname = 'rho_uke_z'
+            q_sf(0:m,0:n,0:p) = real(q_stat_vf(lso_stat_rhouke_beg + 2)%sf(0:m,0:n,0:p), wp)
             call s_write_variable_to_formatted_database_file(varname, t_step)
         end if
 

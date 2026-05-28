@@ -376,14 +376,16 @@ module m_global_parameters
     !> @name LSO statistical product fields for LES subgrid modeling
     !> @{
     logical :: lso_stat_wrt  !< Enable writing of filtered statistical product fields (phi_p, rho*u, tau, etc.)
-    integer :: n_lso_stat    !< Total number of statistical variables (9 in 1D, 19 in 2D, 31 in 3D)
+    integer :: n_lso_stat    !< Total number of statistical variables (11 in 1D, 21 in 2D, 33 in 3D)
     !> Block begin/end indices into q_lso_stat_vf(1:n_lso_stat)
-    integer :: lso_stat_phi_p_beg, lso_stat_phi_p_end  !< phi_p: particle indicator (1 component)
-    integer :: lso_stat_up_beg, lso_stat_up_end        !< phi_p * u_p: particle velocity flux (num_dims components)
-    integer :: lso_stat_rhou_beg, lso_stat_rhou_end    !< gas rho*u (num_dims components)
-    integer :: lso_stat_rhouu_beg, lso_stat_rhouu_end  !< gas rho*u*u symmetric tensor (1/3/6 components)
-    integer :: lso_stat_rhoke_beg, lso_stat_rhoke_end  !< gas rho*u*|u|^2 (num_dims components)
-    integer :: lso_stat_rhouT_beg, lso_stat_rhouT_end  !< gas rho*u*T temperature flux (num_dims components)
+    integer :: lso_stat_phi_p_beg, lso_stat_phi_p_end    !< phi_p: particle indicator (1 component)
+    integer :: lso_stat_rho_beg, lso_stat_rho_end        !< gas rho scalar: gas_mask*rho (1 component)
+    integer :: lso_stat_rhoke_beg, lso_stat_rhoke_end    !< gas KE scalar: gas_mask*(mom1^2+mom2^2+mom3^2)/rho (1 component)
+    integer :: lso_stat_up_beg, lso_stat_up_end          !< phi_p * u_p: particle velocity flux (num_dims components)
+    integer :: lso_stat_rhou_beg, lso_stat_rhou_end      !< gas rho*u (num_dims components)
+    integer :: lso_stat_rhouu_beg, lso_stat_rhouu_end    !< gas rho*u*u symmetric tensor (1/3/6 components)
+    integer :: lso_stat_rhouke_beg, lso_stat_rhouke_end  !< gas rho*u*|u|^2 (num_dims components)
+    integer :: lso_stat_rhouT_beg, lso_stat_rhouT_end    !< gas rho*u*T temperature flux (num_dims components)
     !> Specific gas constant for ideal-gas temperature T = e_int/(gammas(1)*lso_R_gas) [J/(kg*K)]; default 287.0 (air)
     real(wp) :: lso_R_gas
     !> Dynamic viscosity [Pa·s] for the viscous stat pass (tau_ij, tau*u). 0 (default) = skip viscous pass.
@@ -701,10 +703,12 @@ contains
         lso_stat_wrt = .false.
         n_lso_stat = 0
         lso_stat_phi_p_beg = 0; lso_stat_phi_p_end = 0
+        lso_stat_rho_beg = 0; lso_stat_rho_end = 0
+        lso_stat_rhoke_beg = 0; lso_stat_rhoke_end = 0
         lso_stat_up_beg = 0; lso_stat_up_end = 0
         lso_stat_rhou_beg = 0; lso_stat_rhou_end = 0
         lso_stat_rhouu_beg = 0; lso_stat_rhouu_end = 0
-        lso_stat_rhoke_beg = 0; lso_stat_rhoke_end = 0
+        lso_stat_rhouke_beg = 0; lso_stat_rhouke_end = 0
         lso_stat_rhouT_beg = 0; lso_stat_rhouT_end = 0
         lso_R_gas = 287.0_wp
         lso_mu = 0.0_wp
