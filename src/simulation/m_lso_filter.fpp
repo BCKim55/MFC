@@ -157,8 +157,8 @@ contains
     !! primary write.
     impure subroutine s_copy_and_apply_lso_filter(q_cons_vf)
 
-        type(scalar_field), intent(in) :: q_cons_vf(:)
-        integer                        :: i, j, k, l
+        type(scalar_field), intent(inout) :: q_cons_vf(:)
+        integer                           :: i, j, k, l
 
         call nvtxStartRange("LSO-FILTER")
 
@@ -180,6 +180,13 @@ contains
 
         if (lso_stat_wrt .and. n_lso_stat > 0) then
             call nvtxStartRange("LSO-FILTER-STAT")
+            ! Refresh q_cons_vf rank-boundary ghost cells before Pass 2 centred
+            ! differences, for the same reason the filter does a pre-pass exchange:
+            ! ghost cells may reflect an intermediate RK sub-step rather than the
+            ! final updated interior, causing spurious tau at MPI rank boundaries.
+            call s_lso_filter_ghost_refresh(q_cons_vf, 1)
+            if (n > 0) call s_lso_filter_ghost_refresh(q_cons_vf, 2)
+            if (p > 0) call s_lso_filter_ghost_refresh(q_cons_vf, 3)
             call s_compute_lso_stat_fields(q_cons_vf)
             call s_apply_lso_stat_filter()
 #ifndef FRONTIER_UNIFIED
