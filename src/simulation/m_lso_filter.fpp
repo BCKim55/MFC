@@ -577,12 +577,16 @@ contains
 
         type(scalar_field), intent(in) :: q_cons_vf(:)
         integer                        :: i, j, k, l, ib_id
-        real(wp)                       :: rho, rho_loc
-        real(wp)                       :: mom1, mom2, mom3
-        real(wp)                       :: u1, u2, u3
-        real(wp)                       :: E_loc, ke, e_int, T_loc
-        real(wp)                       :: phi_p, gas_mask
-        real(wp)                       :: up1, up2, up3
+        ! Pass 2 loop bounds (narrowed away from physical boundaries, same logic as s_apply_lso_stat_filter).
+        integer  :: j_beg_x, j_end_x
+        integer  :: k_beg_y, k_end_y
+        integer  :: l_beg_z, l_end_z
+        real(wp) :: rho, rho_loc
+        real(wp) :: mom1, mom2, mom3
+        real(wp) :: u1, u2, u3
+        real(wp) :: E_loc, ke, e_int, T_loc
+        real(wp) :: phi_p, gas_mask
+        real(wp) :: up1, up2, up3
         ! Gradient quantities (viscous pass)
         real(wp) :: rho_jm, rho_jp, rho_km, rho_kp, rho_lm, rho_lp
         real(wp) :: u1_jm, u1_jp, u1_km, u1_kp, u1_lm, u1_lp
@@ -693,13 +697,26 @@ contains
         $:END_GPU_PARALLEL_LOOP()
 
         ! Pass 2: viscous stress, heat flux, viscous power flux from centred diffs.
+        ! Boundary ranges: skip cells within buff_size of a physical boundary, since the centred-difference
+        ! stencil would reach into solver BC ghost cells (e.g. slip-wall reflections, inlet values) that are
+        ! not appropriate for viscous gradient evaluation. Cells outside these ranges keep tau=q=0 from Pass 1.
+        j_beg_x = 0; j_end_x = m
+        if (bc_x%beg < 0 .and. bc_x%beg /= BC_PERIODIC) j_beg_x = buff_size
+        if (bc_x%end < 0 .and. bc_x%end /= BC_PERIODIC) j_end_x = m - buff_size
+        k_beg_y = 0; k_end_y = n
+        if (bc_y%beg < 0 .and. bc_y%beg /= BC_PERIODIC) k_beg_y = buff_size
+        if (bc_y%end < 0 .and. bc_y%end /= BC_PERIODIC) k_end_y = n - buff_size
+        l_beg_z = 0; l_end_z = p
+        if (bc_z%beg < 0 .and. bc_z%beg /= BC_PERIODIC) l_beg_z = buff_size
+        if (bc_z%end < 0 .and. bc_z%end /= BC_PERIODIC) l_end_z = p - buff_size
+
         if (viscous .and. lso_mu > 0._wp) then
             if (n == 0) then
                 ! 1D: x-gradients only.
                 $:GPU_PARALLEL_LOOP(collapse=3, private='[j, k, l]')
                 do l = 0, p
                     do k = 0, n
-                        do j = 0, m
+                        do j = j_beg_x, j_end_x
                             rho_loc = max(real(q_cons_vf(eqn_idx%cont%beg)%sf(j, 0, 0), wp), sgm_eps)
                             gas_mask = 1._wp - real(q_lso_stat_vf(lso_stat_phi_p_beg)%sf(j, 0, 0), wp)
 
@@ -733,8 +750,8 @@ contains
                 ! 2D: x- and y-gradients.
                 $:GPU_PARALLEL_LOOP(collapse=3, private='[j, k, l]')
                 do l = 0, p
-                    do k = 0, n
-                        do j = 0, m
+                    do k = k_beg_y, k_end_y
+                        do j = j_beg_x, j_end_x
                             rho_loc = max(real(q_cons_vf(eqn_idx%cont%beg)%sf(j, k, 0), wp), sgm_eps)
                             gas_mask = 1._wp - real(q_lso_stat_vf(lso_stat_phi_p_beg)%sf(j, k, 0), wp)
 
@@ -796,9 +813,9 @@ contains
             else
                 ! 3D: x-, y-, and z-gradients.
                 $:GPU_PARALLEL_LOOP(collapse=3, private='[j, k, l]')
-                do l = 0, p
-                    do k = 0, n
-                        do j = 0, m
+                do l = l_beg_z, l_end_z
+                    do k = k_beg_y, k_end_y
+                        do j = j_beg_x, j_end_x
                             rho_loc = max(real(q_cons_vf(eqn_idx%cont%beg)%sf(j, k, l), wp), sgm_eps)
                             gas_mask = 1._wp - real(q_lso_stat_vf(lso_stat_phi_p_beg)%sf(j, k, l), wp)
 
