@@ -420,6 +420,18 @@ contains
                     end do
                     $:END_GPU_PARALLEL_LOOP()
                 end do
+            else if (beg_bc == BC_PERIODIC) then
+                do i = 1, sys_size
+                    $:GPU_PARALLEL_LOOP(collapse=3, private='[j, k, l]')
+                    do l = 0, p
+                        do k = 0, n
+                            do j = 1, buff_size
+                                q_cons_vf(i)%sf(-j, k, l) = q_cons_vf(i)%sf(m - j + 1, k, l)
+                            end do
+                        end do
+                    end do
+                    $:END_GPU_PARALLEL_LOOP()
+                end do
             end if
             if (end_bc == BC_GHOST_EXTRAP) then
                 do i = 1, sys_size
@@ -428,6 +440,18 @@ contains
                         do k = 0, n
                             do j = 1, buff_size
                                 q_cons_vf(i)%sf(m + j, k, l) = q_cons_vf(i)%sf(m, k, l)
+                            end do
+                        end do
+                    end do
+                    $:END_GPU_PARALLEL_LOOP()
+                end do
+            else if (end_bc == BC_PERIODIC) then
+                do i = 1, sys_size
+                    $:GPU_PARALLEL_LOOP(collapse=3, private='[j, k, l]')
+                    do l = 0, p
+                        do k = 0, n
+                            do j = 1, buff_size
+                                q_cons_vf(i)%sf(m + j, k, l) = q_cons_vf(i)%sf(j - 1, k, l)
                             end do
                         end do
                     end do
@@ -481,6 +505,18 @@ contains
                     end do
                     $:END_GPU_PARALLEL_LOOP()
                 end do
+            else if (beg_bc == BC_PERIODIC) then
+                do i = 1, sys_size
+                    $:GPU_PARALLEL_LOOP(collapse=3, private='[j, k, l]')
+                    do l = 0, p
+                        do k = 1, buff_size
+                            do j = 0, m
+                                q_cons_vf(i)%sf(j, -k, l) = q_cons_vf(i)%sf(j, n - k + 1, l)
+                            end do
+                        end do
+                    end do
+                    $:END_GPU_PARALLEL_LOOP()
+                end do
             end if
             if (end_bc == BC_GHOST_EXTRAP) then
                 do i = 1, sys_size
@@ -489,6 +525,18 @@ contains
                         do k = 1, buff_size
                             do j = 0, m
                                 q_cons_vf(i)%sf(j, n + k, l) = q_cons_vf(i)%sf(j, n, l)
+                            end do
+                        end do
+                    end do
+                    $:END_GPU_PARALLEL_LOOP()
+                end do
+            else if (end_bc == BC_PERIODIC) then
+                do i = 1, sys_size
+                    $:GPU_PARALLEL_LOOP(collapse=3, private='[j, k, l]')
+                    do l = 0, p
+                        do k = 1, buff_size
+                            do j = 0, m
+                                q_cons_vf(i)%sf(j, n + k, l) = q_cons_vf(i)%sf(j, k - 1, l)
                             end do
                         end do
                     end do
@@ -542,6 +590,18 @@ contains
                     end do
                     $:END_GPU_PARALLEL_LOOP()
                 end do
+            else if (beg_bc == BC_PERIODIC) then
+                do i = 1, sys_size
+                    $:GPU_PARALLEL_LOOP(collapse=3, private='[j, k, l]')
+                    do l = 1, buff_size
+                        do k = 0, n
+                            do j = 0, m
+                                q_cons_vf(i)%sf(j, k, -l) = q_cons_vf(i)%sf(j, k, p - l + 1)
+                            end do
+                        end do
+                    end do
+                    $:END_GPU_PARALLEL_LOOP()
+                end do
             end if
             if (end_bc == BC_GHOST_EXTRAP) then
                 do i = 1, sys_size
@@ -550,6 +610,18 @@ contains
                         do k = 0, n
                             do j = 0, m
                                 q_cons_vf(i)%sf(j, k, p + l) = q_cons_vf(i)%sf(j, k, p)
+                            end do
+                        end do
+                    end do
+                    $:END_GPU_PARALLEL_LOOP()
+                end do
+            else if (end_bc == BC_PERIODIC) then
+                do i = 1, sys_size
+                    $:GPU_PARALLEL_LOOP(collapse=3, private='[j, k, l]')
+                    do l = 1, buff_size
+                        do k = 0, n
+                            do j = 0, m
+                                q_cons_vf(i)%sf(j, k, p + l) = q_cons_vf(i)%sf(j, k, l - 1)
                             end do
                         end do
                     end do
