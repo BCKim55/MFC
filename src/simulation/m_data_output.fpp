@@ -293,6 +293,9 @@ contains
         integer :: i, j, k, l, r
         integer :: m_out, n_out, p_out                      !< Effective output bounds (coarser for LSO downsampled, full otherwise)
         real(wp) :: gamma, lit_gamma, pi_inf, qv            !< Temporary EOS params
+        real(wp) :: alpha_cb, w_cb                          !< Interpolation position/weight for coarsened coordinates
+        integer :: cb0, cb1                                 !< Bracketing indices for coordinate interpolation
+        real(wp), allocatable :: cb_tmp(:)                  !< Temporary array for interpolated cell-boundary coordinates
 
         ! Use coarsened bounds when writing LSO downsampled data, otherwise use full domain.
 
@@ -332,21 +335,49 @@ contains
                 end if
             end if
         else if (lso_down_sample_factor > 1) then
-            ! Write stride-sampled coordinate files for the coarsened LSO output. The formula x_cb_coarse(j) = x_cb((j+1)*factor -
-            ! 1) for j = -1..m_lso_ds ensures that the domain boundaries (j=-1 and j=m_lso_ds) are preserved exactly.
+            ! Write interpolated coordinate files for the coarsened LSO output.
+            ! Coarsened boundary j maps to original position (j+1)*(m+1)/(m_lso_ds+1) - 1, so j=-1 always gives
+            ! x_cb(-1) and j=m_lso_ds always gives x_cb(m), preserving domain boundaries exactly for any m.
+            allocate (cb_tmp(-1:m_lso_ds))
+            do j = -1, m_lso_ds
+                alpha_cb = real(j + 1, wp)*real(m + 1, wp)/real(m_lso_ds + 1, wp) - 1._wp
+                cb0 = int(alpha_cb); cb0 = max(cb0, -1)
+                cb1 = min(cb0 + 1, m)
+                w_cb = alpha_cb - real(cb0, wp)
+                cb_tmp(j) = (1._wp - w_cb)*x_cb(cb0) + w_cb*x_cb(cb1)
+            end do
             file_path = trim(t_step_dir) // '/lso_x_cb.dat'
             open (2, FILE=trim(file_path), form='unformatted', STATUS='replace')
-            write (2) (x_cb((j + 1)*lso_down_sample_factor - 1), j=-1, m_lso_ds); close (2)
+            write (2) cb_tmp; close (2)
+            deallocate (cb_tmp)
 
             if (n > 0) then
+                allocate (cb_tmp(-1:n_lso_ds))
+                do j = -1, n_lso_ds
+                    alpha_cb = real(j + 1, wp)*real(n + 1, wp)/real(n_lso_ds + 1, wp) - 1._wp
+                    cb0 = int(alpha_cb); cb0 = max(cb0, -1)
+                    cb1 = min(cb0 + 1, n)
+                    w_cb = alpha_cb - real(cb0, wp)
+                    cb_tmp(j) = (1._wp - w_cb)*y_cb(cb0) + w_cb*y_cb(cb1)
+                end do
                 file_path = trim(t_step_dir) // '/lso_y_cb.dat'
                 open (2, FILE=trim(file_path), form='unformatted', STATUS='replace')
-                write (2) (y_cb((j + 1)*lso_down_sample_factor - 1), j=-1, n_lso_ds); close (2)
+                write (2) cb_tmp; close (2)
+                deallocate (cb_tmp)
 
                 if (p > 0) then
+                    allocate (cb_tmp(-1:p_lso_ds))
+                    do j = -1, p_lso_ds
+                        alpha_cb = real(j + 1, wp)*real(p + 1, wp)/real(p_lso_ds + 1, wp) - 1._wp
+                        cb0 = int(alpha_cb); cb0 = max(cb0, -1)
+                        cb1 = min(cb0 + 1, p)
+                        w_cb = alpha_cb - real(cb0, wp)
+                        cb_tmp(j) = (1._wp - w_cb)*z_cb(cb0) + w_cb*z_cb(cb1)
+                    end do
                     file_path = trim(t_step_dir) // '/lso_z_cb.dat'
                     open (2, FILE=trim(file_path), form='unformatted', STATUS='replace')
-                    write (2) (z_cb((j + 1)*lso_down_sample_factor - 1), j=-1, p_lso_ds); close (2)
+                    write (2) cb_tmp; close (2)
+                    deallocate (cb_tmp)
                 end if
             end if
         end if

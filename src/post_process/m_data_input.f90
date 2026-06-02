@@ -305,15 +305,17 @@ contains
 
             if (down_sample) then
                 stride = 3
-            else if (lso_filter_wrt .and. lso_down_sample_factor > 1) then
-                ! When reading LSO-filtered output saved on a coarser grid, stride through the full-resolution coordinate file to
-                ! recover the correct physical domain extent with N times fewer grid points.
-                stride = lso_down_sample_factor
             else
                 stride = 1
             end if
 
-            file_loc = trim(case_dir) // '/restart_data' // trim(mpiiofs) // 'x_cb.dat'
+            ! LSO downsampled: read pre-computed interpolated coordinates from lso_x_cb.dat (written by
+            ! simulation at startup). This gives the correct full domain coverage without stride rounding.
+            if (lso_filter_wrt .and. lso_down_sample_factor > 1) then
+                file_loc = trim(case_dir) // '/restart_data' // trim(mpiiofs) // 'lso_x_cb.dat'
+            else
+                file_loc = trim(case_dir) // '/restart_data' // trim(mpiiofs) // 'x_cb.dat'
+            end if
             inquire (FILE=trim(file_loc), EXIST=file_exist)
 
             if (file_exist) then
@@ -337,7 +339,11 @@ contains
             x_cc(0:m) = x_cb(-1:m - 1) + dx(0:m)/2._wp
 
             if (n > 0) then
-                file_loc = trim(case_dir) // '/restart_data' // trim(mpiiofs) // 'y_cb.dat'
+                if (lso_filter_wrt .and. lso_down_sample_factor > 1) then
+                    file_loc = trim(case_dir) // '/restart_data' // trim(mpiiofs) // 'lso_y_cb.dat'
+                else
+                    file_loc = trim(case_dir) // '/restart_data' // trim(mpiiofs) // 'y_cb.dat'
+                end if
                 inquire (FILE=trim(file_loc), EXIST=file_exist)
 
                 if (file_exist) then
@@ -361,7 +367,11 @@ contains
                 y_cc(0:n) = y_cb(-1:n - 1) + dy(0:n)/2._wp
 
                 if (p > 0) then
-                    file_loc = trim(case_dir) // '/restart_data' // trim(mpiiofs) // 'z_cb.dat'
+                    if (lso_filter_wrt .and. lso_down_sample_factor > 1) then
+                        file_loc = trim(case_dir) // '/restart_data' // trim(mpiiofs) // 'lso_z_cb.dat'
+                    else
+                        file_loc = trim(case_dir) // '/restart_data' // trim(mpiiofs) // 'z_cb.dat'
+                    end if
                     inquire (FILE=trim(file_loc), EXIST=file_exist)
 
                     if (file_exist) then

@@ -355,20 +355,50 @@ contains
 
     end subroutine s_apply_lso_filter
 
-    !> Decimate q_src_vf into the (pre-allocated) q_dst_vf with stride fac. The source must already be band-limited (filtered) so a
-    !! plain stride pick suffices.
-    impure subroutine s_lso_stride_sample(q_src_vf, q_dst_vf, fac)
+    !> Resample q_src_vf into the (pre-allocated) q_dst_vf onto the coarsened grid using trilinear interpolation. Output cell j maps
+    !! to source position j*m/m_lso_ds (uniformly spaced from 0 to m), so the first and last cells are always exact and the domain
+    !! is fully preserved regardless of divisibility by the stride factor.
+    impure subroutine s_lso_stride_sample(q_src_vf, q_dst_vf)
 
         type(scalar_field), intent(in)    :: q_src_vf(:)
         type(scalar_field), intent(inout) :: q_dst_vf(:)
-        integer, intent(in)               :: fac
         integer                           :: i, j, k, l
+        integer                           :: j0, j1, k0, k1, l0, l1
+        real(wp)                          :: alpha, beta, gamma_pos, wj, wk, wl
 
         do i = 1, sys_size
             do l = 0, p_lso_ds
+                if (p_lso_ds > 0) then
+                    gamma_pos = real(l, wp)*real(p, wp)/real(p_lso_ds, wp)
+                else
+                    gamma_pos = 0._wp
+                end if
+                l0 = int(gamma_pos); l1 = min(l0 + 1, p); wl = gamma_pos - real(l0, wp)
+
                 do k = 0, n_lso_ds
+                    if (n_lso_ds > 0) then
+                        beta = real(k, wp)*real(n, wp)/real(n_lso_ds, wp)
+                    else
+                        beta = 0._wp
+                    end if
+                    k0 = int(beta); k1 = min(k0 + 1, n); wk = beta - real(k0, wp)
+
                     do j = 0, m_lso_ds
-                        q_dst_vf(i)%sf(j, k, l) = q_src_vf(i)%sf(j*fac, k*fac, l*fac)
+                        if (m_lso_ds > 0) then
+                            alpha = real(j, wp)*real(m, wp)/real(m_lso_ds, wp)
+                        else
+                            alpha = 0._wp
+                        end if
+                        j0 = int(alpha); j1 = min(j0 + 1, m); wj = alpha - real(j0, wp)
+
+                        q_dst_vf(i)%sf(j, k, l) = real((1._wp - wj)*(1._wp - wk)*(1._wp - wl)*real(q_src_vf(i)%sf(j0, k0, l0), &
+                                 & wp) + wj*(1._wp - wk)*(1._wp - wl)*real(q_src_vf(i)%sf(j1, k0, l0), &
+                                 & wp) + (1._wp - wj)*wk*(1._wp - wl)*real(q_src_vf(i)%sf(j0, k1, l0), &
+                                 & wp) + wj*wk*(1._wp - wl)*real(q_src_vf(i)%sf(j1, k1, l0), &
+                                 & wp) + (1._wp - wj)*(1._wp - wk)*wl*real(q_src_vf(i)%sf(j0, k0, l1), &
+                                 & wp) + wj*(1._wp - wk)*wl*real(q_src_vf(i)%sf(j1, k0, l1), &
+                                 & wp) + (1._wp - wj)*wk*wl*real(q_src_vf(i)%sf(j0, k1, l1), &
+                                 & wp) + wj*wk*wl*real(q_src_vf(i)%sf(j1, k1, l1), wp), stp)
                     end do
                 end do
             end do
@@ -1576,17 +1606,47 @@ contains
 
     end subroutine s_lso_stat_ghost_refresh
 
-    !> Stat-field analog of s_lso_stride_sample.
+    !> Stat-field analog of s_lso_stride_sample. Uses the same trilinear interpolation approach.
     impure subroutine s_lso_stat_stride_sample()
 
-        integer :: i, j, k, l
+        integer  :: i, j, k, l
+        integer  :: j0, j1, k0, k1, l0, l1
+        real(wp) :: alpha, beta, gamma_pos, wj, wk, wl
 
         do i = 1, n_lso_stat
             do l = 0, p_lso_ds
+                if (p_lso_ds > 0) then
+                    gamma_pos = real(l, wp)*real(p, wp)/real(p_lso_ds, wp)
+                else
+                    gamma_pos = 0._wp
+                end if
+                l0 = int(gamma_pos); l1 = min(l0 + 1, p); wl = gamma_pos - real(l0, wp)
+
                 do k = 0, n_lso_ds
+                    if (n_lso_ds > 0) then
+                        beta = real(k, wp)*real(n, wp)/real(n_lso_ds, wp)
+                    else
+                        beta = 0._wp
+                    end if
+                    k0 = int(beta); k1 = min(k0 + 1, n); wk = beta - real(k0, wp)
+
                     do j = 0, m_lso_ds
-                        q_lso_stat_ds_vf(i)%sf(j, k, l) = q_lso_stat_vf(i)%sf(j*lso_down_sample_factor, k*lso_down_sample_factor, &
-                                         & l*lso_down_sample_factor)
+                        if (m_lso_ds > 0) then
+                            alpha = real(j, wp)*real(m, wp)/real(m_lso_ds, wp)
+                        else
+                            alpha = 0._wp
+                        end if
+                        j0 = int(alpha); j1 = min(j0 + 1, m); wj = alpha - real(j0, wp)
+
+                        q_lso_stat_ds_vf(i)%sf(j, k, &
+                                         & l) = real((1._wp - wj)*(1._wp - wk)*(1._wp - wl)*real(q_lso_stat_vf(i)%sf(j0, k0, l0), &
+                                         & wp) + wj*(1._wp - wk)*(1._wp - wl)*real(q_lso_stat_vf(i)%sf(j1, k0, l0), &
+                                         & wp) + (1._wp - wj)*wk*(1._wp - wl)*real(q_lso_stat_vf(i)%sf(j0, k1, l0), &
+                                         & wp) + wj*wk*(1._wp - wl)*real(q_lso_stat_vf(i)%sf(j1, k1, l0), &
+                                         & wp) + (1._wp - wj)*(1._wp - wk)*wl*real(q_lso_stat_vf(i)%sf(j0, k0, l1), &
+                                         & wp) + wj*(1._wp - wk)*wl*real(q_lso_stat_vf(i)%sf(j1, k0, l1), &
+                                         & wp) + (1._wp - wj)*wk*wl*real(q_lso_stat_vf(i)%sf(j0, k1, l1), &
+                                         & wp) + wj*wk*wl*real(q_lso_stat_vf(i)%sf(j1, k1, l1), wp), stp)
                     end do
                 end do
             end do

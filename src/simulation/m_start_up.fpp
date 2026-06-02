@@ -540,6 +540,69 @@ contains
             end if
         end if
 
+        ! Write interpolated coarsened global coordinates to restart_data so that the parallel post_process
+        ! can read them directly instead of striding x_cb.dat (which misses the last cell when m+1 is not
+        ! divisible by lso_down_sample_factor). Written once by rank 0; all other ranks skip.
+        if (lso_filter_wrt .and. lso_down_sample_factor > 1 .and. proc_rank == 0) then
+            block
+                integer               :: lso_j, lso_cb0, lso_cb1, lso_m_glb_ds
+                real(wp)              :: lso_alpha_cb, lso_w_cb
+                real(wp), allocatable :: lso_cb_tmp(:)
+
+                lso_m_glb_ds = int((m_glb + 1)/lso_down_sample_factor) - 1
+                allocate (lso_cb_tmp(-1:lso_m_glb_ds))
+                do lso_j = -1, lso_m_glb_ds
+                    lso_alpha_cb = real(lso_j + 1, wp)*real(m_glb + 1, wp)/real(lso_m_glb_ds + 1, wp) - 1._wp
+                    lso_cb0 = int(lso_alpha_cb); lso_cb0 = max(lso_cb0, -1)
+                    lso_cb1 = min(lso_cb0 + 1, m_glb)
+                    lso_w_cb = lso_alpha_cb - real(lso_cb0, wp)
+                    lso_cb_tmp(lso_j) = (1._wp - lso_w_cb)*x_cb_glb(lso_cb0) + lso_w_cb*x_cb_glb(lso_cb1)
+                end do
+                file_loc = trim(case_dir) // '/restart_data' // trim(mpiiofs) // 'lso_x_cb.dat'
+                data_size = lso_m_glb_ds + 2
+                call MPI_FILE_OPEN(MPI_COMM_SELF, file_loc, ior(MPI_MODE_WRONLY, MPI_MODE_CREATE), mpi_info_int, ifile, ierr)
+                call MPI_FILE_WRITE(ifile, lso_cb_tmp, data_size, mpi_p, status, ierr)
+                call MPI_FILE_CLOSE(ifile, ierr)
+                deallocate (lso_cb_tmp)
+
+                if (n > 0) then
+                    lso_m_glb_ds = int((n_glb + 1)/lso_down_sample_factor) - 1
+                    allocate (lso_cb_tmp(-1:lso_m_glb_ds))
+                    do lso_j = -1, lso_m_glb_ds
+                        lso_alpha_cb = real(lso_j + 1, wp)*real(n_glb + 1, wp)/real(lso_m_glb_ds + 1, wp) - 1._wp
+                        lso_cb0 = int(lso_alpha_cb); lso_cb0 = max(lso_cb0, -1)
+                        lso_cb1 = min(lso_cb0 + 1, n_glb)
+                        lso_w_cb = lso_alpha_cb - real(lso_cb0, wp)
+                        lso_cb_tmp(lso_j) = (1._wp - lso_w_cb)*y_cb_glb(lso_cb0) + lso_w_cb*y_cb_glb(lso_cb1)
+                    end do
+                    file_loc = trim(case_dir) // '/restart_data' // trim(mpiiofs) // 'lso_y_cb.dat'
+                    data_size = lso_m_glb_ds + 2
+                    call MPI_FILE_OPEN(MPI_COMM_SELF, file_loc, ior(MPI_MODE_WRONLY, MPI_MODE_CREATE), mpi_info_int, ifile, ierr)
+                    call MPI_FILE_WRITE(ifile, lso_cb_tmp, data_size, mpi_p, status, ierr)
+                    call MPI_FILE_CLOSE(ifile, ierr)
+                    deallocate (lso_cb_tmp)
+                end if
+
+                if (p > 0) then
+                    lso_m_glb_ds = int((p_glb + 1)/lso_down_sample_factor) - 1
+                    allocate (lso_cb_tmp(-1:lso_m_glb_ds))
+                    do lso_j = -1, lso_m_glb_ds
+                        lso_alpha_cb = real(lso_j + 1, wp)*real(p_glb + 1, wp)/real(lso_m_glb_ds + 1, wp) - 1._wp
+                        lso_cb0 = int(lso_alpha_cb); lso_cb0 = max(lso_cb0, -1)
+                        lso_cb1 = min(lso_cb0 + 1, p_glb)
+                        lso_w_cb = lso_alpha_cb - real(lso_cb0, wp)
+                        lso_cb_tmp(lso_j) = (1._wp - lso_w_cb)*z_cb_glb(lso_cb0) + lso_w_cb*z_cb_glb(lso_cb1)
+                    end do
+                    file_loc = trim(case_dir) // '/restart_data' // trim(mpiiofs) // 'lso_z_cb.dat'
+                    data_size = lso_m_glb_ds + 2
+                    call MPI_FILE_OPEN(MPI_COMM_SELF, file_loc, ior(MPI_MODE_WRONLY, MPI_MODE_CREATE), mpi_info_int, ifile, ierr)
+                    call MPI_FILE_WRITE(ifile, lso_cb_tmp, data_size, mpi_p, status, ierr)
+                    call MPI_FILE_CLOSE(ifile, ierr)
+                    deallocate (lso_cb_tmp)
+                end if
+            end block
+        end if
+
         deallocate (x_cb_glb, y_cb_glb, z_cb_glb)
 
         if (bc_io) then
@@ -838,7 +901,7 @@ contains
             lso_file_prefix = 'lso_'
             if (lso_down_sample_factor > 1) then
                 call nvtxStartRange("LSO-COARSEN")
-                call s_lso_stride_sample(q_filt_vf, q_filt_ds_vf, lso_down_sample_factor)
+                call s_lso_stride_sample(q_filt_vf, q_filt_ds_vf)
                 call nvtxEndRange
                 if (bubbles_lagrange) then
                     call s_write_data_files(q_filt_ds_vf, q_T_sf, q_prim_vf, save_count, bc_type, q_beta(1))
