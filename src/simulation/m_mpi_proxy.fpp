@@ -77,7 +77,8 @@ contains
             & 'num_source', 'relax_model', 'num_ibs', 'n_start',    &
             & 'num_bc_patches', 'num_igr_iters', 'num_igr_warm_start_iters', &
             & 'adap_dt_max_iters', 'int_comp', 'collision_model', &
-            & 'lso_down_sample_factor', 'lso_n_passes_x', 'lso_n_passes_y', 'lso_n_passes_z' ]
+            & 'lso_down_sample_factor', 'lso_n_passes_x', 'lso_n_passes_y', 'lso_n_passes_z', &
+            & 'lso2_n_passes_x', 'lso2_n_passes_y', 'lso2_n_passes_z' ]
             call MPI_BCAST(${VAR}$, 1, MPI_INTEGER, 0, MPI_COMM_WORLD, ierr)
         #:endfor
 
@@ -244,6 +245,9 @@ contains
         call MPI_BCAST(lso_a_x, 5*lso_max_passes, mpi_p, 0, MPI_COMM_WORLD, ierr)
         call MPI_BCAST(lso_a_y, 5*lso_max_passes, mpi_p, 0, MPI_COMM_WORLD, ierr)
         call MPI_BCAST(lso_a_z, 5*lso_max_passes, mpi_p, 0, MPI_COMM_WORLD, ierr)
+        call MPI_BCAST(lso2_a_x, 5*lso_max_passes, mpi_p, 0, MPI_COMM_WORLD, ierr)
+        call MPI_BCAST(lso2_a_y, 5*lso_max_passes, mpi_p, 0, MPI_COMM_WORLD, ierr)
+        call MPI_BCAST(lso2_a_z, 5*lso_max_passes, mpi_p, 0, MPI_COMM_WORLD, ierr)
 #endif
 
     end subroutine s_mpi_bcast_user_inputs

@@ -965,6 +965,11 @@ def _load():
         _r(n, INT, {"filter"})
     for n in ["lso_a_x", "lso_a_y", "lso_a_z"]:
         _r(n, REAL, {"filter"})
+    # In-situ two-stage (pyramid) coarse-grid pass set (auto-computed)
+    for n in ["lso2_n_passes_x", "lso2_n_passes_y", "lso2_n_passes_z"]:
+        _r(n, INT, {"filter"})
+    for n in ["lso2_a_x", "lso2_a_y", "lso2_a_z"]:
+        _r(n, REAL, {"filter"})
     # LSO post-process filter params (post_process target only)
     _r("lso_pp_filter", LOG, {"filter"})
     for n in ["lso_pp_n_passes_x", "lso_pp_n_passes_y", "lso_pp_n_passes_z"]:

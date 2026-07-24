@@ -115,7 +115,8 @@ contains
             & hyper_cleaning, hyper_cleaning_speed, hyper_cleaning_tau, alf_factor, num_igr_iters, num_igr_warm_start_iters, &
             & int_comp, ic_eps, ic_beta, nv_uvm_out_of_core, nv_uvm_igr_temps_on_gpu, nv_uvm_pref_gpu, down_sample, fft_wrt, &
             & lso_filter, lso_filter_wrt, filter_sigma, lso_down_sample_factor, lso_n_passes_x, lso_n_passes_y, lso_n_passes_z, &
-            & lso_a_x, lso_a_y, lso_a_z, lso_stat_wrt, lso_R_gas, lso_mu, lso_conductivity
+            & lso_a_x, lso_a_y, lso_a_z, lso_stat_wrt, lso_R_gas, lso_mu, lso_conductivity, lso2_n_passes_x, lso2_n_passes_y, &
+            & lso2_n_passes_z, lso2_a_x, lso2_a_y, lso2_a_z
 
         inquire (FILE=trim(file_path), EXIST=file_exist)
 
@@ -902,6 +903,15 @@ contains
             if (lso_down_sample_factor > 1) then
                 call nvtxStartRange("LSO-COARSEN")
                 call s_lso_stride_sample(q_filt_vf, q_filt_ds_vf)
+                if (ib) then
+#ifndef FRONTIER_UNIFIED
+                    $:GPU_UPDATE(host='[q_lso_mask_vf(1)%sf]')
+#endif
+                    call s_lso_stride_sample(q_lso_mask_vf, q_lso_mask_ds_vf)
+                end if
+                ! Two-stage pyramid: finish sigma2 on the coarse grid and normalize
+                ! there (no-op unless lso2 passes are configured by the toolchain).
+                call s_lso_filter_stage2()
                 call nvtxEndRange
                 if (bubbles_lagrange) then
                     call s_write_data_files(q_filt_ds_vf, q_T_sf, q_prim_vf, save_count, bc_type, q_beta(1))
@@ -917,17 +927,17 @@ contains
             end if
             lso_file_prefix = ''
 
-            ! Write the filtered gas-mask (normalized-convolution weight w = filter(m))
-            ! so post_process can compose an additional filter exactly:
-            ! filter2(w*qhat)/filter2(w).
+            ! Write the filtered gas-mask (normalized-convolution weight w) so
+            ! post_process can compose an additional filter exactly:
+            ! filter2(w*qhat)/filter2(w). With downsampling the mask was already
+            ! decimated (and stage-2 filtered under the two-stage pyramid) above.
             if (ib) then
-#ifndef FRONTIER_UNIFIED
-                $:GPU_UPDATE(host='[q_lso_mask_vf(1)%sf]')
-#endif
                 if (lso_down_sample_factor > 1) then
-                    call s_lso_stride_sample(q_lso_mask_vf, q_lso_mask_ds_vf)
                     call s_write_lso_stat_file(q_lso_mask_ds_vf, 1, save_count, 'lso_mask_')
                 else
+#ifndef FRONTIER_UNIFIED
+                    $:GPU_UPDATE(host='[q_lso_mask_vf(1)%sf]')
+#endif
                     call s_write_lso_stat_file(q_lso_mask_vf, 1, save_count, 'lso_mask_')
                 end if
             end if
@@ -936,6 +946,10 @@ contains
                 if (lso_down_sample_factor > 1) then
                     call nvtxStartRange("LSO-COARSEN-STAT")
                     call s_lso_stat_stride_sample()
+                    ! Two-stage pyramid: stat products are linear in the filter, so
+                    ! applying sigma2 to the decimated sigma1-filtered products yields
+                    ! the target-width filtered products exactly.
+                    if (lso2_n_passes_x > 0) call s_apply_lso_filter_coarse(q_lso_stat_ds_vf)
                     call nvtxEndRange
                     call s_write_lso_stat_file(q_lso_stat_ds_vf, n_lso_stat, save_count)
                 else

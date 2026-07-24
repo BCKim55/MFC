@@ -200,6 +200,26 @@ class Case:
                         f"data will alias."
                     )
 
+        # Two-stage in-situ pyramid: when the target width exceeds the stage-1 width
+        # (~8 cells, or 1.6*factor for anti-aliasing) and the output is downsampled,
+        # filter sigma1 on the fine grid, decimate, then finish with
+        # sigma2 = sqrt(target^2 - sigma1^2) on the coarse grid inside the simulation.
+        # The written data is at the TARGET width either way.
+        sigma1_cells = max(8.0, 1.6 * factor)
+        d_active = [d for d in (dx, dy, dz) if d > 0.0]
+        sigma1 = sigma1_cells * max(d_active)
+        two_stage = str(p.get("lso_filter_wrt", "F")).upper() == "T" and factor > 1 and filter_sigma > 1.05 * sigma1
+        if two_stage and str(p.get("parallel_io", "F")).upper() != "T":
+            raise common.MFCException("Two-stage in-situ LSO filtering (filter_sigma above ~8 cells with lso_down_sample_factor > 1) requires parallel_io = T.")
+
+        if two_stage:
+            sigma2 = math.sqrt(filter_sigma**2 - sigma1**2)
+            _, cdx, cdy, cdz = self.__get_grid_spacing(down_sample_factor=factor)
+            cons.print(f"[cyan]LSO filter:[/cyan] two-stage in-situ: sigma1={sigma1:.4g} (fine), {factor}x decimation, sigma2={sigma2:.4g} (coarse) -> target {filter_sigma:.4g}")
+            lines = lso_namelist_lines(compute_lso_params(d_p, dx, dy, dz, sigma1))
+            lines += lso_namelist_lines(compute_lso_params(d_p, cdx, cdy, cdz, sigma2), prefix="lso2_")
+            return lines
+
         cons.print("[cyan]LSO filter:[/cyan] computing weights...")
         lso_params = compute_lso_params(d_p, dx, dy, dz, filter_sigma)
 

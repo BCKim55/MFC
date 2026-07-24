@@ -369,6 +369,12 @@ module m_global_parameters
     real(wp)           :: lso_a_x(5, lso_max_passes)  !< Per-pass stencil coefficients in x
     real(wp)           :: lso_a_y(5, lso_max_passes)  !< Per-pass stencil coefficients in y
     real(wp)           :: lso_a_z(5, lso_max_passes)  !< Per-pass stencil coefficients in z
+    integer            :: lso2_n_passes_x  !< Stage-2 (coarse grid) passes in x; > 0 activates the two-stage in-situ pyramid
+    integer            :: lso2_n_passes_y  !< Stage-2 passes in y
+    integer            :: lso2_n_passes_z  !< Stage-2 passes in z
+    real(wp)           :: lso2_a_x(5, lso_max_passes)  !< Stage-2 per-pass stencil coefficients in x
+    real(wp)           :: lso2_a_y(5, lso_max_passes)  !< Stage-2 per-pass stencil coefficients in y
+    real(wp)           :: lso2_a_z(5, lso_max_passes)  !< Stage-2 per-pass stencil coefficients in z
     $:GPU_DECLARE(create='[lso_filter, lso_n_passes_x, lso_n_passes_y, lso_n_passes_z]')
     $:GPU_DECLARE(create='[lso_a_x, lso_a_y, lso_a_z]')
     !> @}
@@ -698,6 +704,12 @@ contains
         lso_a_x = 0.0_wp
         lso_a_y = 0.0_wp
         lso_a_z = 0.0_wp
+        lso2_n_passes_x = 0
+        lso2_n_passes_y = 0
+        lso2_n_passes_z = 0
+        lso2_a_x = 0.0_wp
+        lso2_a_y = 0.0_wp
+        lso2_a_z = 0.0_wp
 
         ! LSO statistical product fields
         lso_stat_wrt = .false.

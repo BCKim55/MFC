@@ -25,7 +25,7 @@ module m_lso_filter
 
     public :: s_initialize_lso_filter_module, s_apply_lso_filter, s_copy_and_apply_lso_filter, s_lso_stride_sample, &
         & s_finalize_lso_filter_module, q_filt_vf, q_filt_ds_vf, q_lso_stat_vf, q_lso_stat_ds_vf, s_compute_lso_stat_fields, &
-        & s_lso_stat_stride_sample, q_lso_mask_vf, q_lso_mask_ds_vf
+        & s_lso_stat_stride_sample, q_lso_mask_vf, q_lso_mask_ds_vf, s_lso_filter_stage2, s_apply_lso_filter_coarse
 
     ! Scratch buffer for one directional pass (interior only).
     real(wp), allocatable, dimension(:,:,:) :: lso_tmp
@@ -41,6 +41,17 @@ module m_lso_filter
 
     ! Coarsened version (lso_down_sample_factor > 1).
     type(scalar_field), allocatable :: q_filt_ds_vf(:)
+
+    ! Coarse-grid (stage-2) machinery for the two-stage in-situ pyramid. The coarse
+    ! arrays carry lso_crs_gw ghost layers in each ACTIVE direction so the 9-point
+    ! stage-2 cascade can run on the decimated grid; stage 2 executes on the host
+    ! (the coarse grid is 1/factor^ndims of the fine cells, so cost is negligible).
+    integer, parameter    :: lso_crs_gw = 4
+    integer               :: crs_lo(3), crs_hi(3)
+    real(wp), allocatable :: lso2_tmp(:,:,:)
+#ifdef MFC_MPI
+    real(wp), allocatable :: buff_crs_send(:), buff_crs_recv(:)
+#endif
 
     ! Coarsened filtered gas-mask (the normalized-convolution weight w = filter(m)),
     ! written alongside the filtered fields so post_process can compose an additional
@@ -84,13 +95,33 @@ contains
             end if
 
             if (lso_down_sample_factor > 1) then
+                crs_lo = 0; crs_hi = 0
+                crs_lo(1) = -lso_crs_gw; crs_hi(1) = m_lso_ds + lso_crs_gw
+                if (n_lso_ds > 0) then
+                    crs_lo(2) = -lso_crs_gw; crs_hi(2) = n_lso_ds + lso_crs_gw
+                end if
+                if (p_lso_ds > 0) then
+                    crs_lo(3) = -lso_crs_gw; crs_hi(3) = p_lso_ds + lso_crs_gw
+                end if
                 @:ALLOCATE(q_filt_ds_vf(1:sys_size))
                 do i = 1, sys_size
-                    @:ALLOCATE(q_filt_ds_vf(i)%sf(0:m_lso_ds, 0:n_lso_ds, 0:p_lso_ds))
+                    @:ALLOCATE(q_filt_ds_vf(i)%sf(crs_lo(1):crs_hi(1), crs_lo(2):crs_hi(2), crs_lo(3):crs_hi(3)))
                 end do
                 if (ib) then
                     @:ALLOCATE(q_lso_mask_ds_vf(1:1))
-                    @:ALLOCATE(q_lso_mask_ds_vf(1)%sf(0:m_lso_ds, 0:n_lso_ds, 0:p_lso_ds))
+                    @:ALLOCATE(q_lso_mask_ds_vf(1)%sf(crs_lo(1):crs_hi(1), crs_lo(2):crs_hi(2), crs_lo(3):crs_hi(3)))
+                end if
+                if (lso2_n_passes_x > 0) then
+                    allocate (lso2_tmp(0:m_lso_ds,0:n_lso_ds,0:p_lso_ds))
+#ifdef MFC_MPI
+                    block
+                        integer :: nv_max, face_max
+                        nv_max = max(sys_size, max(n_lso_stat, 1))
+                        face_max = max((n_lso_ds + 1)*(p_lso_ds + 1), (m_lso_ds + 1)*(p_lso_ds + 1), (m_lso_ds + 1)*(n_lso_ds + 1))
+                        allocate (buff_crs_send(0:nv_max*lso_crs_gw*face_max - 1))
+                        allocate (buff_crs_recv(0:nv_max*lso_crs_gw*face_max - 1))
+                    end block
+#endif
                 end if
             end if
 
@@ -106,7 +137,7 @@ contains
                 if (lso_down_sample_factor > 1) then
                     @:ALLOCATE(q_lso_stat_ds_vf(1:n_lso_stat))
                     do i = 1, n_lso_stat
-                        @:ALLOCATE(q_lso_stat_ds_vf(i)%sf(0:m_lso_ds, 0:n_lso_ds, 0:p_lso_ds))
+                        @:ALLOCATE(q_lso_stat_ds_vf(i)%sf(crs_lo(1):crs_hi(1), crs_lo(2):crs_hi(2), crs_lo(3):crs_hi(3)))
                     end do
                 end if
 #ifdef MFC_MPI
@@ -158,6 +189,10 @@ contains
                     @:DEALLOCATE(q_lso_mask_ds_vf(1)%sf)
                     @:DEALLOCATE(q_lso_mask_ds_vf)
                 end if
+                if (allocated(lso2_tmp)) deallocate (lso2_tmp)
+#ifdef MFC_MPI
+                if (allocated(buff_crs_send)) deallocate (buff_crs_send, buff_crs_recv)
+#endif
             end if
 
             if (lso_stat_wrt .and. n_lso_stat > 0) then
@@ -249,18 +284,23 @@ contains
             ! reconstruction finite (zeroing rho there gave u = mom/rho = 0/0). The
             ! floor only guards the division where almost no fluid lies within the
             ! filter reach (particle diameter >> filter width, not the target regime).
-            do i = 1, sys_size
-                $:GPU_PARALLEL_LOOP(collapse=3, private='[j, k, l]')
-                do l = 0, p
-                    do k = 0, n
-                        do j = 0, m
-                            q_filt_vf(i)%sf(j, k, l) = real(real(q_filt_vf(i)%sf(j, k, l), wp)/max(real(q_lso_mask_vf(1)%sf(j, k, &
-                                      & l), wp), 1.0e-3_wp), stp)
+            ! Two-stage pyramid (lso2 passes > 0): numerator and denominator stay
+            ! UNnormalized here; stage 2 filters both on the coarse grid and
+            ! normalizes there (s_lso_filter_stage2).
+            if (lso2_n_passes_x <= 0) then
+                do i = 1, sys_size
+                    $:GPU_PARALLEL_LOOP(collapse=3, private='[j, k, l]')
+                    do l = 0, p
+                        do k = 0, n
+                            do j = 0, m
+                                q_filt_vf(i)%sf(j, k, l) = real(real(q_filt_vf(i)%sf(j, k, l), &
+                                          & wp)/max(real(q_lso_mask_vf(1)%sf(j, k, l), wp), 1.0e-3_wp), stp)
+                            end do
                         end do
                     end do
+                    $:END_GPU_PARALLEL_LOOP()
                 end do
-                $:END_GPU_PARALLEL_LOOP()
-            end do
+            end if
         else
             call s_apply_lso_filter(q_filt_vf)
         end if
@@ -527,6 +567,317 @@ contains
         end do
 
     end subroutine s_lso_stride_sample
+
+    !> Host halo refresh for the coarse (decimated) grid used by the stage-2 pyramid cascade: MPI exchange of lso_crs_gw layers on
+    !! decomposed directions (sequential counter packing, identical nesting on pack and unpack), then periodic wrap or edge clamp
+    !! for physical boundaries.
+    impure subroutine s_lso_coarse_ghost_refresh(q_vf, mpi_dir)
+
+        type(scalar_field), intent(inout) :: q_vf(:)
+        integer, intent(in)               :: mpi_dir
+        integer                           :: nv, i, j, k, l, g
+        integer                           :: beg_bc, end_bc, grid_dim
+
+#ifdef MFC_MPI
+        integer :: ierr, r, cnt, pack_offset, unpack_offset, pbc_loc, side
+        integer :: dst_proc, src_proc, send_tag, recv_tag
+        integer :: beg_end(2)
+        logical :: beg_end_geq_0
+#endif
+
+        nv = size(q_vf)
+        select case (mpi_dir)
+        case (1)
+            beg_bc = bc_x%beg; end_bc = bc_x%end; grid_dim = m_lso_ds
+        case (2)
+            beg_bc = bc_y%beg; end_bc = bc_y%end; grid_dim = n_lso_ds
+        case (3)
+            beg_bc = bc_z%beg; end_bc = bc_z%end; grid_dim = p_lso_ds
+        end select
+
+#ifdef MFC_MPI
+        beg_end = (/beg_bc, end_bc/)
+        select case (mpi_dir)
+        case (1)
+            cnt = nv*lso_crs_gw*(n_lso_ds + 1)*(p_lso_ds + 1)
+        case (2)
+            cnt = nv*lso_crs_gw*(m_lso_ds + 1)*(p_lso_ds + 1)
+        case (3)
+            cnt = nv*lso_crs_gw*(m_lso_ds + 1)*(n_lso_ds + 1)
+        end select
+
+        do side = 1, 2
+            pbc_loc = 2*side - 3  ! -1 (beg) then +1 (end)
+            if (beg_end(side) < 0) cycle
+            beg_end_geq_0 = beg_end(max(pbc_loc, 0) - pbc_loc + 1) >= 0
+            send_tag = f_logical_to_int(.not. f_xor(beg_end_geq_0, pbc_loc == 1))
+            recv_tag = f_logical_to_int(pbc_loc == 1)
+            dst_proc = beg_end(1 + f_logical_to_int(f_xor(pbc_loc == 1, beg_end_geq_0)))
+            src_proc = beg_end(1 + f_logical_to_int(pbc_loc == 1))
+            pack_offset = 0
+            if (f_xor(pbc_loc == 1, beg_end_geq_0)) pack_offset = grid_dim - lso_crs_gw + 1
+            unpack_offset = 0
+            if (pbc_loc == 1) unpack_offset = grid_dim + lso_crs_gw + 1
+
+            r = -1
+            select case (mpi_dir)
+            case (1)
+                do l = 0, p_lso_ds
+                    do k = 0, n_lso_ds
+                        do g = 0, lso_crs_gw - 1
+                            do i = 1, nv
+                                r = r + 1
+                                buff_crs_send(r) = real(q_vf(i)%sf(g + pack_offset, k, l), wp)
+                            end do
+                        end do
+                    end do
+                end do
+            case (2)
+                do l = 0, p_lso_ds
+                    do g = 0, lso_crs_gw - 1
+                        do j = 0, m_lso_ds
+                            do i = 1, nv
+                                r = r + 1
+                                buff_crs_send(r) = real(q_vf(i)%sf(j, g + pack_offset, l), wp)
+                            end do
+                        end do
+                    end do
+                end do
+            case (3)
+                do g = 0, lso_crs_gw - 1
+                    do k = 0, n_lso_ds
+                        do j = 0, m_lso_ds
+                            do i = 1, nv
+                                r = r + 1
+                                buff_crs_send(r) = real(q_vf(i)%sf(j, k, g + pack_offset), wp)
+                            end do
+                        end do
+                    end do
+                end do
+            end select
+
+            call MPI_SENDRECV(buff_crs_send, cnt, mpi_p, dst_proc, send_tag, buff_crs_recv, cnt, mpi_p, src_proc, recv_tag, &
+                              & MPI_COMM_WORLD, MPI_STATUS_IGNORE, ierr)
+
+            r = -1
+            select case (mpi_dir)
+            case (1)
+                do l = 0, p_lso_ds
+                    do k = 0, n_lso_ds
+                        do g = -lso_crs_gw, -1
+                            do i = 1, nv
+                                r = r + 1
+                                q_vf(i)%sf(g + unpack_offset, k, l) = real(buff_crs_recv(r), stp)
+                            end do
+                        end do
+                    end do
+                end do
+            case (2)
+                do l = 0, p_lso_ds
+                    do g = -lso_crs_gw, -1
+                        do j = 0, m_lso_ds
+                            do i = 1, nv
+                                r = r + 1
+                                q_vf(i)%sf(j, g + unpack_offset, l) = real(buff_crs_recv(r), stp)
+                            end do
+                        end do
+                    end do
+                end do
+            case (3)
+                do g = -lso_crs_gw, -1
+                    do k = 0, n_lso_ds
+                        do j = 0, m_lso_ds
+                            do i = 1, nv
+                                r = r + 1
+                                q_vf(i)%sf(j, k, g + unpack_offset) = real(buff_crs_recv(r), stp)
+                            end do
+                        end do
+                    end do
+                end do
+            end select
+        end do
+#endif
+
+        ! Physical boundaries: periodic wrap, else clamp to the edge cell.
+        do i = 1, nv
+            select case (mpi_dir)
+            case (1)
+                do l = 0, p_lso_ds
+                    do k = 0, n_lso_ds
+                        do g = 1, lso_crs_gw
+                            if (beg_bc == BC_PERIODIC) then
+                                q_vf(i)%sf(-g, k, l) = q_vf(i)%sf(grid_dim - g + 1, k, l)
+                            else if (beg_bc < 0) then
+                                q_vf(i)%sf(-g, k, l) = q_vf(i)%sf(0, k, l)
+                            end if
+                            if (end_bc == BC_PERIODIC) then
+                                q_vf(i)%sf(grid_dim + g, k, l) = q_vf(i)%sf(g - 1, k, l)
+                            else if (end_bc < 0) then
+                                q_vf(i)%sf(grid_dim + g, k, l) = q_vf(i)%sf(grid_dim, k, l)
+                            end if
+                        end do
+                    end do
+                end do
+            case (2)
+                do l = 0, p_lso_ds
+                    do g = 1, lso_crs_gw
+                        do j = 0, m_lso_ds
+                            if (beg_bc == BC_PERIODIC) then
+                                q_vf(i)%sf(j, -g, l) = q_vf(i)%sf(j, grid_dim - g + 1, l)
+                            else if (beg_bc < 0) then
+                                q_vf(i)%sf(j, -g, l) = q_vf(i)%sf(j, 0, l)
+                            end if
+                            if (end_bc == BC_PERIODIC) then
+                                q_vf(i)%sf(j, grid_dim + g, l) = q_vf(i)%sf(j, g - 1, l)
+                            else if (end_bc < 0) then
+                                q_vf(i)%sf(j, grid_dim + g, l) = q_vf(i)%sf(j, grid_dim, l)
+                            end if
+                        end do
+                    end do
+                end do
+            case (3)
+                do g = 1, lso_crs_gw
+                    do k = 0, n_lso_ds
+                        do j = 0, m_lso_ds
+                            if (beg_bc == BC_PERIODIC) then
+                                q_vf(i)%sf(j, k, -g) = q_vf(i)%sf(j, k, grid_dim - g + 1)
+                            else if (beg_bc < 0) then
+                                q_vf(i)%sf(j, k, -g) = q_vf(i)%sf(j, k, 0)
+                            end if
+                            if (end_bc == BC_PERIODIC) then
+                                q_vf(i)%sf(j, k, grid_dim + g) = q_vf(i)%sf(j, k, g - 1)
+                            else if (end_bc < 0) then
+                                q_vf(i)%sf(j, k, grid_dim + g) = q_vf(i)%sf(j, k, grid_dim)
+                            end if
+                        end do
+                    end do
+                end do
+            end select
+        end do
+
+    end subroutine s_lso_coarse_ghost_refresh
+
+    !> Stage-2 cascade of the two-stage in-situ pyramid: apply the lso2_a_* passes to the coarse-grid fields in place. Runs on the
+    !! host - the coarse grid holds 1/factor^ndims of the fine cells, so the cost is negligible next to stage 1.
+    impure subroutine s_apply_lso_filter_coarse(q_vf)
+
+        type(scalar_field), intent(inout) :: q_vf(:)
+        integer                           :: i, ipass, j, k, l, nv
+        real(wp)                          :: c0, c1, c2, c3, c4
+
+        nv = size(q_vf)
+
+        call s_lso_coarse_ghost_refresh(q_vf, 1)
+        do ipass = 1, lso2_n_passes_x
+            c0 = lso2_a_x(1, ipass); c1 = lso2_a_x(2, ipass); c2 = lso2_a_x(3, ipass)
+            c3 = lso2_a_x(4, ipass); c4 = lso2_a_x(5, ipass)
+            do i = 1, nv
+                do l = 0, p_lso_ds
+                    do k = 0, n_lso_ds
+                        do j = 0, m_lso_ds
+                            lso2_tmp(j, k, l) = c0*real(q_vf(i)%sf(j, k, l), wp) + c1*(real(q_vf(i)%sf(j - 1, k, l), &
+                                     & wp) + real(q_vf(i)%sf(j + 1, k, l), wp)) + c2*(real(q_vf(i)%sf(j - 2, k, l), &
+                                     & wp) + real(q_vf(i)%sf(j + 2, k, l), wp)) + c3*(real(q_vf(i)%sf(j - 3, k, l), &
+                                     & wp) + real(q_vf(i)%sf(j + 3, k, l), wp)) + c4*(real(q_vf(i)%sf(j - 4, k, l), &
+                                     & wp) + real(q_vf(i)%sf(j + 4, k, l), wp))
+                        end do
+                    end do
+                end do
+                do l = 0, p_lso_ds
+                    do k = 0, n_lso_ds
+                        do j = 0, m_lso_ds
+                            q_vf(i)%sf(j, k, l) = real(lso2_tmp(j, k, l), stp)
+                        end do
+                    end do
+                end do
+            end do
+            if (ipass < lso2_n_passes_x) call s_lso_coarse_ghost_refresh(q_vf, 1)
+        end do
+
+        if (n_lso_ds > 0) then
+            call s_lso_coarse_ghost_refresh(q_vf, 2)
+            do ipass = 1, lso2_n_passes_y
+                c0 = lso2_a_y(1, ipass); c1 = lso2_a_y(2, ipass); c2 = lso2_a_y(3, ipass)
+                c3 = lso2_a_y(4, ipass); c4 = lso2_a_y(5, ipass)
+                do i = 1, nv
+                    do l = 0, p_lso_ds
+                        do k = 0, n_lso_ds
+                            do j = 0, m_lso_ds
+                                lso2_tmp(j, k, l) = c0*real(q_vf(i)%sf(j, k, l), wp) + c1*(real(q_vf(i)%sf(j, k - 1, l), &
+                                         & wp) + real(q_vf(i)%sf(j, k + 1, l), wp)) + c2*(real(q_vf(i)%sf(j, k - 2, l), &
+                                         & wp) + real(q_vf(i)%sf(j, k + 2, l), wp)) + c3*(real(q_vf(i)%sf(j, k - 3, l), &
+                                         & wp) + real(q_vf(i)%sf(j, k + 3, l), wp)) + c4*(real(q_vf(i)%sf(j, k - 4, l), &
+                                         & wp) + real(q_vf(i)%sf(j, k + 4, l), wp))
+                            end do
+                        end do
+                    end do
+                    do l = 0, p_lso_ds
+                        do k = 0, n_lso_ds
+                            do j = 0, m_lso_ds
+                                q_vf(i)%sf(j, k, l) = real(lso2_tmp(j, k, l), stp)
+                            end do
+                        end do
+                    end do
+                end do
+                if (ipass < lso2_n_passes_y) call s_lso_coarse_ghost_refresh(q_vf, 2)
+            end do
+        end if
+
+        if (p_lso_ds > 0) then
+            call s_lso_coarse_ghost_refresh(q_vf, 3)
+            do ipass = 1, lso2_n_passes_z
+                c0 = lso2_a_z(1, ipass); c1 = lso2_a_z(2, ipass); c2 = lso2_a_z(3, ipass)
+                c3 = lso2_a_z(4, ipass); c4 = lso2_a_z(5, ipass)
+                do i = 1, nv
+                    do l = 0, p_lso_ds
+                        do k = 0, n_lso_ds
+                            do j = 0, m_lso_ds
+                                lso2_tmp(j, k, l) = c0*real(q_vf(i)%sf(j, k, l), wp) + c1*(real(q_vf(i)%sf(j, k, l - 1), &
+                                         & wp) + real(q_vf(i)%sf(j, k, l + 1), wp)) + c2*(real(q_vf(i)%sf(j, k, l - 2), &
+                                         & wp) + real(q_vf(i)%sf(j, k, l + 2), wp)) + c3*(real(q_vf(i)%sf(j, k, l - 3), &
+                                         & wp) + real(q_vf(i)%sf(j, k, l + 3), wp)) + c4*(real(q_vf(i)%sf(j, k, l - 4), &
+                                         & wp) + real(q_vf(i)%sf(j, k, l + 4), wp))
+                            end do
+                        end do
+                    end do
+                    do l = 0, p_lso_ds
+                        do k = 0, n_lso_ds
+                            do j = 0, m_lso_ds
+                                q_vf(i)%sf(j, k, l) = real(lso2_tmp(j, k, l), stp)
+                            end do
+                        end do
+                    end do
+                end do
+                if (ipass < lso2_n_passes_z) call s_lso_coarse_ghost_refresh(q_vf, 3)
+            end do
+        end if
+
+    end subroutine s_apply_lso_filter_coarse
+
+    !> Complete the two-stage in-situ pyramid on the downsampled arrays: stage-2 filter the decimated numerator (and mask
+    !! denominator when ib), then normalize so the written data is at the TARGET width. No-op unless lso2 passes are configured.
+    impure subroutine s_lso_filter_stage2()
+
+        integer :: i, j, k, l
+
+        if (lso2_n_passes_x <= 0) return
+
+        call s_apply_lso_filter_coarse(q_filt_ds_vf)
+        if (ib) then
+            call s_apply_lso_filter_coarse(q_lso_mask_ds_vf)
+            do i = 1, sys_size
+                do l = 0, p_lso_ds
+                    do k = 0, n_lso_ds
+                        do j = 0, m_lso_ds
+                            q_filt_ds_vf(i)%sf(j, k, l) = real(real(q_filt_ds_vf(i)%sf(j, k, l), &
+                                         & wp)/max(real(q_lso_mask_ds_vf(1)%sf(j, k, l), wp), 1.0e-3_wp), stp)
+                        end do
+                    end do
+                end do
+            end do
+        end if
+
+    end subroutine s_lso_filter_stage2
 
     !> Refresh ghost cells between filter passes for direction mpi_dir (1=x, 2=y, 3=z). MPI ghosts come via sendrecv, then
     !! IBM-flagged ghosts are zero-extrapolated to keep particle velocity out of the fluid stencil. BC_GHOST_EXTRAP faces are
