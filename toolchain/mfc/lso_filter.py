@@ -132,6 +132,41 @@ def find_min_lso_passes(
     return max_passes, err, coeffs
 
 
+def _worst_partial_product(coeffs_list: List[Tuple[float, ...]], xi: np.ndarray) -> float:
+    """Peak magnitude of the running partial product as the passes are applied in
+    order. 1.0 is ideal (the cascade never amplifies); large values mean the
+    sequential application blows up mid-cascade before later passes cancel it."""
+    P = np.ones_like(xi)
+    worst = 1.0
+    for c in coeffs_list:
+        P = P * _filter_tf(np.asarray(c, dtype=float), xi)
+        worst = max(worst, float(np.max(np.abs(P))))
+    return worst
+
+
+def reorder_passes_for_conditioning(coeffs_list: List[Tuple[float, ...]], xi: np.ndarray) -> List[Tuple[float, ...]]:
+    """Greedily reorder passes so the intermediate partial products stay as small as
+    possible. The composed transfer function is unchanged (passes multiply, so they
+    commute); only the numerical conditioning of the sequential Fortran application
+    improves. Without this, a high-gain pass early in the cascade can amplify high
+    wavenumbers by huge factors, which per-pass stp rounding then loses near sharp
+    features (e.g. immersed-boundary steps), leaving spurious discontinuities."""
+    if len(coeffs_list) <= 1:
+        return list(coeffs_list)
+
+    Hs = [_filter_tf(np.asarray(c, dtype=float), xi) for c in coeffs_list]
+    remaining = list(range(len(coeffs_list)))
+    order: List[int] = []
+    P = np.ones_like(xi)
+    while remaining:
+        best = min(remaining, key=lambda i: float(np.max(np.abs(P * Hs[i]))))
+        order.append(best)
+        P = P * Hs[best]
+        remaining.remove(best)
+
+    return [coeffs_list[i] for i in order]
+
+
 def compute_lso_params(
     d_p: float,
     dx: float,
@@ -150,13 +185,17 @@ def compute_lso_params(
         directions.append(("z", dz))
 
     result: dict = {}
+    xi = np.linspace(0.0, np.pi, _N_XI)
     for tag, d in directions:
         sigma_target = filter_sigma / d
         n_passes, err, coeffs = find_min_lso_passes(sigma_target, conv_tol=conv_tol, max_passes=max_passes)
+        gain_before = _worst_partial_product(coeffs, xi)
+        coeffs = reorder_passes_for_conditioning(coeffs, xi)
+        gain_after = _worst_partial_product(coeffs, xi)
         result[f"lso_n_passes_{tag}"] = n_passes
         result[f"lso_a_{tag}"] = coeffs
         n_res = d_p / d
-        print(f"  [LSO] {tag}-dir: N_res={n_res:.2f}, sigma_target={sigma_target:.2f} cells, N_passes={n_passes}, L2_err={err:.2e}")
+        print(f"  [LSO] {tag}-dir: N_res={n_res:.2f}, sigma_target={sigma_target:.2f} cells, N_passes={n_passes}, L2_err={err:.2e}, peak_partial_gain={gain_before:.1e}->{gain_after:.1e}")
 
     if dy <= 0.0:
         result["lso_n_passes_y"] = 0
@@ -168,16 +207,20 @@ def compute_lso_params(
     return result
 
 
-def lso_namelist_lines(lso_params: dict) -> str:
+def lso_namelist_lines(lso_params: dict, prefix: str = "lso_") -> str:
     """Format the dict from compute_lso_params() as &user_inputs namelist lines.
-    lso_a_x is shape (5, LSO_MAX_PASSES), column-major, zero-padded."""
+    lso_a_x is shape (5, LSO_MAX_PASSES), column-major, zero-padded.
+
+    The dict keys from compute_lso_params() are always in lso_ form (lso_n_passes_x,
+    lso_a_x). ``prefix`` sets the namelist variable prefix in the emitted lines: "lso_" for
+    the in-situ filter, "lso_pp_" for the post_process additional filter."""
     lines = []
 
     for tag in ["x", "y", "z"]:
         n_passes = lso_params.get(f"lso_n_passes_{tag}", 0)
         coeffs = lso_params.get(f"lso_a_{tag}", [])
 
-        lines.append(f"lso_n_passes_{tag} = {n_passes}")
+        lines.append(f"{prefix}n_passes_{tag} = {n_passes}")
 
         if n_passes > 0 and coeffs:
             # Fortran column-major: coeff index varies fastest.
@@ -188,6 +231,6 @@ def lso_namelist_lines(lso_params: dict) -> str:
                         flat.append(f"{coeffs[i_pass][j_coeff]:.17e}")
                     else:
                         flat.append("0.0e0")
-            lines.append(f"lso_a_{tag} = {' '.join(flat)}")
+            lines.append(f"{prefix}a_{tag} = {' '.join(flat)}")
 
     return "\n".join(lines) + "\n"
