@@ -188,14 +188,26 @@ def compute_lso_params(
     xi = np.linspace(0.0, np.pi, _N_XI)
     for tag, d in directions:
         sigma_target = filter_sigma / d
+        # Finite-precision stability wall of the repeated 9-point cascade on
+        # discontinuous input (see filt_test/SESSION_HANDOFF.md): reliable to
+        # sigma ~40 cells, catastrophic blow-up by ~50.
+        if sigma_target > 45.0:
+            raise ValueError(
+                f"LSO filter: sigma = {sigma_target:.1f} cells in {tag} exceeds the "
+                f"stability limit (~45) of the repeated 9-point cascade. Filter at a "
+                f"smaller in-situ width and compose to the target in post_process "
+                f"(lso_filter_sigma_in/lso_filter_sigma_target), or coarsen the grid."
+            )
+        if sigma_target > 40.0:
+            print(f"  [LSO] WARNING: sigma = {sigma_target:.1f} cells in {tag} is near the ~45-cell stability limit; consider a smaller in-situ width composed in post_process.")
         n_passes, err, coeffs = find_min_lso_passes(sigma_target, conv_tol=conv_tol, max_passes=max_passes)
         gain_before = _worst_partial_product(coeffs, xi)
         coeffs = reorder_passes_for_conditioning(coeffs, xi)
         gain_after = _worst_partial_product(coeffs, xi)
         result[f"lso_n_passes_{tag}"] = n_passes
         result[f"lso_a_{tag}"] = coeffs
-        n_res = d_p / d
-        print(f"  [LSO] {tag}-dir: N_res={n_res:.2f}, sigma_target={sigma_target:.2f} cells, N_passes={n_passes}, L2_err={err:.2e}, peak_partial_gain={gain_before:.1e}->{gain_after:.1e}")
+        n_res_note = f"N_res={d_p / d:.2f}, " if d_p > 0.0 else ""
+        print(f"  [LSO] {tag}-dir: {n_res_note}sigma_target={sigma_target:.2f} cells, N_passes={n_passes}, L2_err={err:.2e}, peak_partial_gain={gain_before:.1e}->{gain_after:.1e}")
 
     if dy <= 0.0:
         result["lso_n_passes_y"] = 0

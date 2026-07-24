@@ -143,12 +143,10 @@ class Case:
         designed against the coarse spacing to hit the target physical sigma."""
         p = self.params
 
-        # Particle diameter from IBM patch (physical, unaffected by coarsening)
-        try:
-            radius = float(p["patch_ib(1)%radius"])
-        except KeyError:
-            raise common.MFCException("LSO filter requires patch_ib(1)%radius to be set.")
-        d_p = 2.0 * radius
+        # Particle diameter from IBM patch (physical, unaffected by coarsening). Only
+        # needed for the d_p/2 default width and the N_res log line; d_p = 0 when the
+        # case has no IB patch and filter_sigma is set explicitly.
+        d_p = 2.0 * float(p.get("patch_ib(1)%radius", 0.0))
 
         # Cell counts; coarsen them exactly as the simulation does when requested.
         m_cells = int(p.get("m", 0))
@@ -177,7 +175,14 @@ class Case:
 
         p = self.params
         d_p, dx, dy, dz = self.__get_grid_spacing()
-        filter_sigma = float(p.get("filter_sigma", d_p / 2.0))
+        if "filter_sigma" in p:
+            filter_sigma = float(p["filter_sigma"])
+        elif d_p > 0.0:
+            filter_sigma = d_p / 2.0
+        else:
+            raise common.MFCException("lso_filter = T requires filter_sigma (or patch_ib(1)%radius for the d_p/2 default).")
+        if filter_sigma <= 0.0:
+            raise common.MFCException("filter_sigma must be > 0.")
 
         cons.print("[cyan]LSO filter:[/cyan] computing weights...")
         lso_params = compute_lso_params(d_p, dx, dy, dz, filter_sigma)
@@ -187,31 +192,42 @@ class Case:
     def __get_lso_pp_lines(self) -> str:
         """Compute the post_process additional LSO filter weights and return namelist lines.
 
-        The additional pass brings data already filtered at lso_filter_sigma_in up to
-        lso_filter_sigma_target. Gaussian filters compose by adding variances, so the extra
-        width is sigma2 = sqrt(sigma_target^2 - sigma_in^2). The 9-point minimum-pass design is
-        identical to the in-situ filter; only the emitted prefix (lso_pp_) differs."""
+        The pass brings the data post_process reads up to lso_filter_sigma_target. Gaussian
+        filters compose by adding variances, so the extra width is
+        sigma2 = sqrt(sigma_target^2 - sigma_in^2), where sigma_in is the width already applied
+        to the input data:
+          - lso_filter_wrt = T: input is the in-situ filtered data; sigma_in defaults to the
+            in-situ width (filter_sigma, or d_p/2 when unset).
+          - lso_filter_wrt = F: input is the ORIGINAL unfiltered data; sigma_in defaults to 0
+            and the full target width is applied from scratch on the fine grid.
+        The 9-point minimum-pass design is identical to the in-situ filter; only the emitted
+        prefix (lso_pp_) differs."""
         from .lso_filter import compute_lso_params, lso_namelist_lines
 
         p = self.params
-        sigma_in = float(p.get("lso_filter_sigma_in", 0.0))
+        factor = int(p.get("lso_down_sample_factor", 1))
+        lso_filter_wrt = str(p.get("lso_filter_wrt", "F")).upper() == "T"
+        ds = factor if (lso_filter_wrt and factor > 1) else 1
+        d_p, dx, dy, dz = self.__get_grid_spacing(down_sample_factor=ds)
+
+        if "lso_filter_sigma_in" in p:
+            sigma_in = float(p["lso_filter_sigma_in"])
+        elif lso_filter_wrt:
+            # Reading in-situ filtered data: its width is filter_sigma (default d_p/2).
+            sigma_in = float(p.get("filter_sigma", d_p / 2.0))
+        else:
+            sigma_in = 0.0
         sigma_target = float(p.get("lso_filter_sigma_target", 0.0))
 
-        if sigma_in <= 0.0:
-            raise common.MFCException("lso_pp_filter = T requires lso_filter_sigma_in > 0.")
+        if sigma_in < 0.0:
+            raise common.MFCException("lso_filter_sigma_in must be >= 0.")
+        if lso_filter_wrt and sigma_in <= 0.0:
+            raise common.MFCException("lso_pp_filter = T with lso_filter_wrt = T reads already-filtered data: set lso_filter_sigma_in (> 0) to its width, or set filter_sigma/patch_ib(1)%radius.")
         if sigma_target <= sigma_in:
             msg = f"lso_filter_sigma_target ({sigma_target}) must be > lso_filter_sigma_in ({sigma_in})."
             raise common.MFCException(msg)
 
         sigma2 = math.sqrt(sigma_target**2 - sigma_in**2)
-
-        # The post_process filter reads the in-situ filtered restart data. With lso_filter_wrt=T and
-        # lso_down_sample_factor>1 that data is on the coarsened grid, so design the 9-point filter
-        # against the coarse spacing; otherwise the filter would over-smooth by ~the stride factor.
-        factor = int(p.get("lso_down_sample_factor", 1))
-        lso_filter_wrt = str(p.get("lso_filter_wrt", "F")).upper() == "T"
-        ds = factor if (lso_filter_wrt and factor > 1) else 1
-        d_p, dx, dy, dz = self.__get_grid_spacing(down_sample_factor=ds)
 
         grid_note = f" (coarse grid, stride {factor})" if ds > 1 else ""
         cons.print(f"[cyan]LSO filter (post_process):[/cyan] sigma_in={sigma_in:.4g}, sigma_target={sigma_target:.4g}, sigma2={sigma2:.4g}{grid_note} — computing weights...")

@@ -667,7 +667,7 @@ To restart the simulation from $k$-th time step, see @ref running "Restarting Ca
 | `lso_a_y`               | Real    | Per-pass 9-point stencil coefficients in y (5 × lso_max_passes, auto-computed) |
 | `lso_a_z`               | Real    | Per-pass 9-point stencil coefficients in z (5 × lso_max_passes, auto-computed) |
 | `lso_pp_filter`         | Logical | Apply an additional LSO filter pass in post_process before writing output. Requires lso_filter_wrt=True. |
-| `lso_filter_sigma_in`   | Real    | Gaussian sigma (physical units) already applied to the input data; the toolchain sizes the post_process pass from this and `lso_filter_sigma_target` |
+| `lso_filter_sigma_in`   | Real    | Gaussian sigma (physical units) already applied to the input data. Defaults to the in-situ width (`filter_sigma`, or d_p/2) when reading filtered data (`lso_filter_wrt=T`), and to 0 when reading original data (`lso_filter_wrt=F`). The toolchain sizes the post_process pass for sqrt(target² − in²) |
 | `lso_filter_sigma_target`| Real   | Target Gaussian sigma (physical units) for the post_process filter; must be &gt; `lso_filter_sigma_in` |
 | `lso_pp_n_passes_x`     | Integer | Number of post-process filter passes in x |
 | `lso_pp_n_passes_y`     | Integer | Number of post-process filter passes in y |

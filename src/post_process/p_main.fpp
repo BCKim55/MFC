@@ -48,8 +48,10 @@ program p_main
         ! Post-process FIR filter: apply an additional Gaussian filter to the conserved variables in place,
         ! then reconvert to primitive so s_save_data emits the filtered cons AND prim fields (s_apply_lso_pp_filter
         ! only touches q_cons_vf). When lso_stat_wrt=T, compute the stat product fields now, while q_cons_vf still
-        ! holds the filtered state (the secondary pass below reloads unfiltered data). Requires lso_filter_wrt=T so
-        ! s_save_data routes output to silo_hdf5_lso/.
+        ! holds the filtered state (the secondary pass below reloads unfiltered data). Works on either input:
+        ! pre-filtered coarse data (lso_filter_wrt=T; toolchain sizes the pass for sqrt(target^2 - in^2)) or the
+        ! original full-resolution data (lso_filter_wrt=F; full target width). Output goes to silo_hdf5_lso/
+        ! in both cases (s_save_data routes on lso_filter_wrt .or. lso_pp_filter).
         if (lso_pp_filter) then
             call s_apply_lso_pp_filter(q_cons_vf)
             call s_reconvert_filtered_to_primitive()
