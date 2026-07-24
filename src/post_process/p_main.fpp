@@ -9,7 +9,7 @@ program p_main
     use m_start_up
     use m_data_output, only: s_switch_output_dirs
     use m_data_input, only: q_cons_vf
-    use m_lso_pp_filter, only: s_apply_lso_pp_filter
+    use m_lso_pp_filter, only: s_apply_lso_pp_filter, s_compute_lso_pp_stat_fields
 
     implicit none
 
@@ -45,9 +45,16 @@ program p_main
         ! Primary pass: read (LSO-filtered when lso_filter_wrt=T) and write.
         call s_perform_time_step(t_step)
 
-        ! Post-process FIR filter: apply to conserved variables in-place before writing.
-        ! Requires lso_filter_wrt=T so s_save_data routes output to silo_hdf5_lso/.
-        if (lso_pp_filter) call s_apply_lso_pp_filter(q_cons_vf)
+        ! Post-process FIR filter: apply an additional Gaussian filter to the conserved variables in place,
+        ! then reconvert to primitive so s_save_data emits the filtered cons AND prim fields (s_apply_lso_pp_filter
+        ! only touches q_cons_vf). When lso_stat_wrt=T, compute the stat product fields now, while q_cons_vf still
+        ! holds the filtered state (the secondary pass below reloads unfiltered data). Requires lso_filter_wrt=T so
+        ! s_save_data routes output to silo_hdf5_lso/.
+        if (lso_pp_filter) then
+            call s_apply_lso_pp_filter(q_cons_vf)
+            call s_reconvert_filtered_to_primitive()
+            if (lso_stat_wrt) call s_compute_lso_pp_stat_fields(q_cons_vf)
+        end if
 
         call s_save_data(t_step, varname, pres, c, H)
 
@@ -65,9 +72,16 @@ program p_main
             lso_filter_wrt = .true.
         end if
 
-        ! Third pass: read lso_stat binary and write statistical product fields to silo_hdf5_lso_stat/.
-        if (lso_filter_wrt .and. lso_stat_wrt) then
-            call s_save_lso_stat_data(t_step)
+        ! Third pass: write LSO statistical product fields to silo_hdf5_lso_stat/. In post_process filter mode the
+        ! fields were computed in-process above (from the filtered state); otherwise they are read from the
+        ! simulation-written lso_stat binary. Done here (after the secondary pass) so the lso_stat directory switch
+        ! does not disturb the primary/secondary Silo writes.
+        if (lso_stat_wrt) then
+            if (lso_pp_filter) then
+                call s_save_lso_pp_stat_data(t_step)
+            else if (lso_filter_wrt) then
+                call s_save_lso_stat_data(t_step)
+            end if
         end if
 
         call cpu_time(finish)

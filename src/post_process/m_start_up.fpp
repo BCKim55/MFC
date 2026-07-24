@@ -279,6 +279,22 @@ contains
 
     end subroutine s_reload_data
 
+    !> Reconvert conservative variables to primitive after the post_process LSO filter has modified q_cons_vf in place.
+    !! s_apply_lso_pp_filter only touches q_cons_vf, so q_prim_vf (used for velocity, pressure, and other primitive-derived output
+    !! in s_save_data) must be refreshed; otherwise stale, unfiltered primitive data is written. Mirrors the buffer-population +
+    !! conversion sequence in s_reload_data (grid buffers are unchanged).
+    impure subroutine s_reconvert_filtered_to_primitive()
+
+        if (chemistry) call s_compute_q_T_sf(q_T_sf, q_cons_vf, idwbuff)
+
+        if (buff_size > 0) then
+            call s_populate_variables_buffers(bc_type, q_cons_vf, q_T_sf=q_T_sf)
+        end if
+
+        call s_convert_conservative_to_primitive_variables(q_cons_vf, q_T_sf, q_prim_vf, idwbuff)
+
+    end subroutine s_reconvert_filtered_to_primitive
+
     !> Derive requested flow quantities from primitive variables and write them to the formatted database files.
     impure subroutine s_save_data(t_step, varname, pres, c, H)
 
@@ -931,7 +947,6 @@ contains
 
         integer, intent(in)             :: t_step
         type(scalar_field), allocatable :: q_stat_vf(:)
-        character(LEN=name_len)         :: varname
         logical                         :: found
         integer                         :: i
 
@@ -954,13 +969,37 @@ contains
         end block
 #endif
 
-        if (.not. found) then
-            do i = 1, n_lso_stat
-                deallocate (q_stat_vf(i)%sf)
-            end do
-            deallocate (q_stat_vf)
-            return
-        end if
+        if (found) call s_write_lso_stat_fields(q_stat_vf, t_step)
+
+        do i = 1, n_lso_stat
+            deallocate (q_stat_vf(i)%sf)
+        end do
+        deallocate (q_stat_vf)
+
+    end subroutine s_save_lso_stat_data
+
+    !> Write the post_process-computed LSO stat fields (q_lso_pp_stat_vf from m_lso_pp_filter) to silo_hdf5_lso_stat/. The fields
+    !! are computed in-process by s_compute_lso_pp_stat_fields from the post_process-filtered conserved state, so no binary file
+    !! read is required (unlike s_save_lso_stat_data).
+    impure subroutine s_save_lso_pp_stat_data(t_step)
+
+        integer, intent(in) :: t_step
+
+        if (n_lso_stat <= 0) return
+
+        call s_write_lso_stat_fields(q_lso_pp_stat_vf, t_step)
+
+    end subroutine s_save_lso_pp_stat_data
+
+    !> Write the LSO statistical product fields in q_stat_vf to the silo_hdf5_lso_stat/ database. Shared by s_save_lso_stat_data
+    !! (fields read from the simulation-written binary file) and s_save_lso_pp_stat_data (fields computed in-process from the
+    !! post_process-filtered state). Switches to the lso_stat output directory, writes the grid and all variables, then restores the
+    !! LSO directory for subsequent passes.
+    impure subroutine s_write_lso_stat_fields(q_stat_vf, t_step)
+
+        type(scalar_field), intent(in) :: q_stat_vf(:)
+        integer, intent(in)            :: t_step
+        character(LEN=name_len)        :: varname
 
         call s_switch_to_lso_stat_dir()
         call s_open_formatted_database_file(t_step)
@@ -1124,12 +1163,7 @@ contains
         ! Restore LSO directory for subsequent passes
         call s_switch_output_dirs(.true.)
 
-        do i = 1, n_lso_stat
-            deallocate (q_stat_vf(i)%sf)
-        end do
-        deallocate (q_stat_vf)
-
-    end subroutine s_save_lso_stat_data
+    end subroutine s_write_lso_stat_fields
 
     !> Transpose 3-D complex data from x-pencil to y-pencil layout via MPI_Alltoall.
     subroutine s_mpi_transpose_x2y

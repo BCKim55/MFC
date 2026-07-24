@@ -270,6 +270,8 @@ DESCRIPTIONS = {
     "lso_R_gas": "Specific gas constant [J/(kg·K)] for temperature reconstruction used in stat fields. Default 287.0 (dry air).",
     # LSO post-process filter
     "lso_pp_filter": "Apply an additional LSO filter pass in post_process before writing output. Requires lso_filter_wrt=True.",
+    "lso_filter_sigma_in": "Gaussian sigma (physical units) of the filter already applied to the input data; used to size the post_process pass",
+    "lso_filter_sigma_target": "Target Gaussian sigma (physical units) for the post_process filter; must be greater than lso_filter_sigma_in",
     "lso_pp_n_passes_x": "Number of post-process filter passes in x",
     "lso_pp_n_passes_y": "Number of post-process filter passes in y",
     "lso_pp_n_passes_z": "Number of post-process filter passes in z",

@@ -959,6 +959,8 @@ def _load():
     _r("lso_down_sample_factor", INT, {"filter"})
     _r("lso_stat_wrt", LOG, {"filter"})
     _r("lso_R_gas", REAL, {"filter"})
+    _r("lso_filter_sigma_in", REAL, {"filter"})
+    _r("lso_filter_sigma_target", REAL, {"filter"})
     for n in ["lso_n_passes_x", "lso_n_passes_y", "lso_n_passes_z"]:
         _r(n, INT, {"filter"})
     for n in ["lso_a_x", "lso_a_y", "lso_a_z"]:

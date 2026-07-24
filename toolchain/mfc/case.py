@@ -90,9 +90,13 @@ class Case:
         cons.print(f"[yellow]INFO:[/yellow] Forwarded {len(self.params) - len(ignored)}/{len(self.params)} parameters.")
         cons.unindent()
 
-        # Inject LSO filter weights if lso_filter = T (simulation target only)
+        # Inject LSO filter weights. The in-situ filter (simulation target) auto-computes lso_a_*
+        # from filter_sigma; the post_process filter (post_process target) auto-computes lso_pp_a_*
+        # from the lso_filter_sigma_in / lso_filter_sigma_target pair.
         if target.name == "simulation" and str(self.params.get("lso_filter", "F")).upper() == "T":
             dict_str += self.__get_lso_lines()
+        if target.name == "post_process" and str(self.params.get("lso_pp_filter", "F")).upper() == "T":
+            dict_str += self.__get_lso_pp_lines()
 
         return f"&user_inputs\n{dict_str}&end/\n"
 
@@ -128,23 +132,33 @@ class Case:
                 raise common.MFCException(f"{origin_txt}:\n{error_msg}")
             raise common.MFCException(f"Validation errors:\n{error_msg}")
 
-    def __get_lso_lines(self) -> str:
-        """Compute LSO filter weights and return formatted Fortran namelist lines."""
-        from .lso_filter import compute_lso_params, lso_namelist_lines
+    def __get_grid_spacing(self, down_sample_factor: int = 1):
+        """Return (d_p, dx, dy, dz) from the case params. d_p = 2 * patch_ib(1)%radius;
+        grid spacing assumes a uniform grid.
 
+        When down_sample_factor > 1 the spacing is computed on the coarsened grid the simulation
+        actually wrote, mirroring the m_lso_ds = int((m+1)/factor) - 1 formula in m_start_up.fpp.
+        The physical domain is unchanged, so the coarse spacing is ~factor times the fine spacing.
+        The post_process LSO filter reads this coarse data, so its 9-point coefficients must be
+        designed against the coarse spacing to hit the target physical sigma."""
         p = self.params
 
-        # Particle diameter from IBM patch
+        # Particle diameter from IBM patch (physical, unaffected by coarsening)
         try:
             radius = float(p["patch_ib(1)%radius"])
         except KeyError:
-            raise common.MFCException("lso_filter = T requires patch_ib(1)%radius to be set.")
+            raise common.MFCException("LSO filter requires patch_ib(1)%radius to be set.")
         d_p = 2.0 * radius
 
-        # Grid spacing (uniform grid assumed)
+        # Cell counts; coarsen them exactly as the simulation does when requested.
         m_cells = int(p.get("m", 0))
         n_cells = int(p.get("n", 0))
         p_cells = int(p.get("p", 0))
+        if down_sample_factor > 1:
+            m_cells = (m_cells + 1) // down_sample_factor - 1
+            n_cells = (n_cells + 1) // down_sample_factor - 1 if n_cells > 0 else 0
+            p_cells = (p_cells + 1) // down_sample_factor - 1 if p_cells > 0 else 0
+
         x_beg = float(p.get("x_domain%beg", 0.0))
         x_end = float(p.get("x_domain%end", 1.0))
         y_beg = float(p.get("y_domain%beg", 0.0))
@@ -155,13 +169,55 @@ class Case:
         dx = (x_end - x_beg) / (m_cells + 1)
         dy = (y_end - y_beg) / (n_cells + 1) if n_cells > 0 else 0.0
         dz = (z_end - z_beg) / (p_cells + 1) if p_cells > 0 else 0.0
+        return d_p, dx, dy, dz
 
+    def __get_lso_lines(self) -> str:
+        """Compute in-situ LSO filter weights and return formatted Fortran namelist lines."""
+        from .lso_filter import compute_lso_params, lso_namelist_lines
+
+        p = self.params
+        d_p, dx, dy, dz = self.__get_grid_spacing()
         filter_sigma = float(p.get("filter_sigma", d_p / 2.0))
 
         cons.print("[cyan]LSO filter:[/cyan] computing weights...")
         lso_params = compute_lso_params(d_p, dx, dy, dz, filter_sigma)
 
         return lso_namelist_lines(lso_params)
+
+    def __get_lso_pp_lines(self) -> str:
+        """Compute the post_process additional LSO filter weights and return namelist lines.
+
+        The additional pass brings data already filtered at lso_filter_sigma_in up to
+        lso_filter_sigma_target. Gaussian filters compose by adding variances, so the extra
+        width is sigma2 = sqrt(sigma_target^2 - sigma_in^2). The 9-point minimum-pass design is
+        identical to the in-situ filter; only the emitted prefix (lso_pp_) differs."""
+        from .lso_filter import compute_lso_params, lso_namelist_lines
+
+        p = self.params
+        sigma_in = float(p.get("lso_filter_sigma_in", 0.0))
+        sigma_target = float(p.get("lso_filter_sigma_target", 0.0))
+
+        if sigma_in <= 0.0:
+            raise common.MFCException("lso_pp_filter = T requires lso_filter_sigma_in > 0.")
+        if sigma_target <= sigma_in:
+            msg = f"lso_filter_sigma_target ({sigma_target}) must be > lso_filter_sigma_in ({sigma_in})."
+            raise common.MFCException(msg)
+
+        sigma2 = math.sqrt(sigma_target**2 - sigma_in**2)
+
+        # The post_process filter reads the in-situ filtered restart data. With lso_filter_wrt=T and
+        # lso_down_sample_factor>1 that data is on the coarsened grid, so design the 9-point filter
+        # against the coarse spacing; otherwise the filter would over-smooth by ~the stride factor.
+        factor = int(p.get("lso_down_sample_factor", 1))
+        lso_filter_wrt = str(p.get("lso_filter_wrt", "F")).upper() == "T"
+        ds = factor if (lso_filter_wrt and factor > 1) else 1
+        d_p, dx, dy, dz = self.__get_grid_spacing(down_sample_factor=ds)
+
+        grid_note = f" (coarse grid, stride {factor})" if ds > 1 else ""
+        cons.print(f"[cyan]LSO filter (post_process):[/cyan] sigma_in={sigma_in:.4g}, sigma_target={sigma_target:.4g}, sigma2={sigma2:.4g}{grid_note} — computing weights...")
+        lso_params = compute_lso_params(d_p, dx, dy, dz, sigma2)
+
+        return lso_namelist_lines(lso_params, prefix="lso_pp_")
 
     def __get_ndims(self) -> int:
         return 1 + min(int(self.params.get("n", 0)), 1) + min(int(self.params.get("p", 0)), 1)
