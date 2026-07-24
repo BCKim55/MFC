@@ -184,6 +184,22 @@ class Case:
         if filter_sigma <= 0.0:
             raise common.MFCException("filter_sigma must be > 0.")
 
+        # Anti-aliasing guard for downsampled output: decimation by F folds content above
+        # the coarse Nyquist (pi/F) unless the filter has already removed it, which needs
+        # sigma >= ~1.53*F cells (attenuation ~1e-5 at pi/F). Warn, don't error: the user
+        # may accept mild aliasing or filter further in post_process before analysis.
+        factor = int(p.get("lso_down_sample_factor", 1))
+        if str(p.get("lso_filter_wrt", "F")).upper() == "T" and factor > 1:
+            sig_min = 1.53 * factor
+            for tag, d in (("x", dx), ("y", dy), ("z", dz)):
+                if d > 0.0 and filter_sigma / d < sig_min:
+                    cons.print(
+                        f"[yellow]Warning:[/yellow] LSO: filter_sigma = "
+                        f"{filter_sigma / d:.1f} cells in {tag} is below the ~{sig_min:.1f}-cell "
+                        f"anti-aliasing minimum for {factor}x downsampled output; the coarse "
+                        f"data will alias."
+                    )
+
         cons.print("[cyan]LSO filter:[/cyan] computing weights...")
         lso_params = compute_lso_params(d_p, dx, dy, dz, filter_sigma)
 

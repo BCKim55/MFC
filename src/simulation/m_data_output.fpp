@@ -1817,10 +1817,11 @@ contains
 
     !> Write n_stat LSO stat fields to lso_stat_<t_step>.dat via MPI-IO. Caller passes either q_lso_stat_vf or its stride-sampled
     !! twin q_lso_stat_ds_vf.
-    impure subroutine s_write_lso_stat_file(q_stat_vf, n_stat, t_step)
+    impure subroutine s_write_lso_stat_file(q_stat_vf, n_stat, t_step, fname)
 
-        type(scalar_field), intent(in) :: q_stat_vf(:)
-        integer, intent(in)            :: n_stat, t_step
+        type(scalar_field), intent(in)         :: q_stat_vf(:)
+        integer, intent(in)                    :: n_stat, t_step
+        character(LEN=*), intent(in), optional :: fname  !< file basename prefix (default 'lso_stat_')
 
 #ifdef MFC_MPI
         integer                              :: ifile, ierr, data_size, i, j, k, l
@@ -1878,7 +1879,11 @@ contains
         WP_MOK = int(storage_size(0._stp)/8, MPI_OFFSET_KIND)
         MOK = int(1._wp, MPI_OFFSET_KIND)
 
-        write (file_loc, '(A,I0,A)') 'lso_stat_', t_step, '.dat'
+        if (present(fname)) then
+            write (file_loc, '(A,I0,A)') trim(fname), t_step, '.dat'
+        else
+            write (file_loc, '(A,I0,A)') 'lso_stat_', t_step, '.dat'
+        end if
         file_loc = trim(case_dir) // '/restart_data' // trim(mpiiofs) // trim(file_loc)
         inquire (FILE=trim(file_loc), EXIST=file_exist)
         if (file_exist .and. proc_rank == 0) then

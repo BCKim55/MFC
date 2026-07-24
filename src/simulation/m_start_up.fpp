@@ -917,6 +917,21 @@ contains
             end if
             lso_file_prefix = ''
 
+            ! Write the filtered gas-mask (normalized-convolution weight w = filter(m))
+            ! so post_process can compose an additional filter exactly:
+            ! filter2(w*qhat)/filter2(w).
+            if (ib) then
+#ifndef FRONTIER_UNIFIED
+                $:GPU_UPDATE(host='[q_lso_mask_vf(1)%sf]')
+#endif
+                if (lso_down_sample_factor > 1) then
+                    call s_lso_stride_sample(q_lso_mask_vf, q_lso_mask_ds_vf)
+                    call s_write_lso_stat_file(q_lso_mask_ds_vf, 1, save_count, 'lso_mask_')
+                else
+                    call s_write_lso_stat_file(q_lso_mask_vf, 1, save_count, 'lso_mask_')
+                end if
+            end if
+
             if (lso_stat_wrt .and. n_lso_stat > 0) then
                 if (lso_down_sample_factor > 1) then
                     call nvtxStartRange("LSO-COARSEN-STAT")

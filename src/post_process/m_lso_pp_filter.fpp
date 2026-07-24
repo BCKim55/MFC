@@ -8,8 +8,13 @@
 !!
 !! Applies a second 9-point FIR pass with sigma_2 = sqrt(sigma_target^2 - sigma_in^2)
 !! using the lso_pp_a_* weights from the Python BCD design. Stat product fields are
-!! computed afterwards from the filtered state. IB markers are not available here,
-!! so phi_p = 0 / gas_mask = 1 everywhere.
+!! computed afterwards from the filtered state.
+!!
+!! IB-aware normalization: s_apply_lso_pp_filter_masked filters with a weight field w,
+!! q <- filter(w*q)/filter(w). For original (unfiltered) input w is the binary gas mask
+!! from ib_markers; for pre-filtered input w is the simulation-written stage-1 filtered
+!! mask (lso_mask_<t>.dat), which composes the two-stage normalized convolution exactly:
+!! filter2(w*qhat1)/filter2(w) = filter2(filter1(m*q))/filter2(filter1(m)).
 module m_lso_pp_filter
 
     use m_derived_types
@@ -17,13 +22,14 @@ module m_lso_pp_filter
     use m_mpi_common
     use m_constants
     use m_variables_conversion, only: gammas
+    use m_data_input, only: ib_markers
 
     implicit none
 
     private
 
     public :: s_initialize_lso_pp_filter_module, s_finalize_lso_pp_filter_module, s_apply_lso_pp_filter, &
-        & s_compute_lso_pp_stat_fields, q_lso_pp_stat_vf
+        & s_compute_lso_pp_stat_fields, q_lso_pp_stat_vf, s_apply_lso_pp_filter_masked, s_lso_pp_mask_from_ib
 
     ! Scratch buffer for one directional pass.
     real(wp), allocatable :: lso_pp_tmp(:,:,:)
@@ -67,8 +73,10 @@ contains
     impure subroutine s_apply_lso_pp_filter(q_cons_vf)
 
         type(scalar_field), intent(inout) :: q_cons_vf(:)
-        integer                           :: i, ipass, j, k, l
+        integer                           :: i, ipass, j, k, l, nv
         real(wp)                          :: c0, c1, c2, c3, c4
+
+        nv = size(q_cons_vf)
 
         ! x-direction
 
@@ -79,7 +87,7 @@ contains
             c2 = lso_pp_a_x(3, ipass)
             c3 = lso_pp_a_x(4, ipass)
             c4 = lso_pp_a_x(5, ipass)
-            do i = 1, sys_size
+            do i = 1, nv
                 do l = 0, p
                     do k = 0, n
                         do j = 0, m
@@ -111,7 +119,7 @@ contains
                 c2 = lso_pp_a_y(3, ipass)
                 c3 = lso_pp_a_y(4, ipass)
                 c4 = lso_pp_a_y(5, ipass)
-                do i = 1, sys_size
+                do i = 1, nv
                     do l = 0, p
                         do k = 0, n
                             do j = 0, m
@@ -145,7 +153,7 @@ contains
                 c2 = lso_pp_a_z(3, ipass)
                 c3 = lso_pp_a_z(4, ipass)
                 c4 = lso_pp_a_z(5, ipass)
-                do i = 1, sys_size
+                do i = 1, nv
                     do l = 0, p
                         do k = 0, n
                             do j = 0, m
@@ -172,13 +180,69 @@ contains
 
     end subroutine s_apply_lso_pp_filter
 
+    !> Fill the interior of w_vf with the binary gas mask from ib_markers: 1 in fluid, 0 inside an immersed body. Used when
+    !! post_process filters ORIGINAL data.
+    impure subroutine s_lso_pp_mask_from_ib(w_vf)
+
+        type(scalar_field), intent(inout) :: w_vf(1:1)
+        integer                           :: j, k, l
+
+        do l = 0, p
+            do k = 0, n
+                do j = 0, m
+                    if (ib_markers%sf(j, k, l) > 0) then
+                        w_vf(1)%sf(j, k, l) = 0._stp
+                    else
+                        w_vf(1)%sf(j, k, l) = 1._stp
+                    end if
+                end do
+            end do
+        end do
+
+    end subroutine s_lso_pp_mask_from_ib
+
+    !> Mask-normalized filtering: q <- filter(w*q) / filter(w), applied in place. The solid interior takes the normalized fluid
+    !! average (finite primitives everywhere); the floor only guards cells with almost no fluid within the filter reach.
+    impure subroutine s_apply_lso_pp_filter_masked(q_cons_vf, w_vf)
+
+        type(scalar_field), intent(inout) :: q_cons_vf(:), w_vf(1:1)
+        integer                           :: i, j, k, l
+
+        do i = 1, sys_size
+            do l = 0, p
+                do k = 0, n
+                    do j = 0, m
+                        q_cons_vf(i)%sf(j, k, l) = real(real(q_cons_vf(i)%sf(j, k, l), wp)*real(w_vf(1)%sf(j, k, l), wp), stp)
+                    end do
+                end do
+            end do
+        end do
+
+        call s_apply_lso_pp_filter(q_cons_vf)  ! numerator   filter(w*q)
+        call s_apply_lso_pp_filter(w_vf)  ! denominator filter(w)
+
+        do i = 1, sys_size
+            do l = 0, p
+                do k = 0, n
+                    do j = 0, m
+                        q_cons_vf(i)%sf(j, k, l) = real(real(q_cons_vf(i)%sf(j, k, l), wp)/max(real(w_vf(1)%sf(j, k, l), wp), &
+                                  & 1.0e-3_wp), stp)
+                    end do
+                end do
+            end do
+        end do
+
+    end subroutine s_apply_lso_pp_filter_masked
+
     !> Refresh ghosts for direction mpi_dir (1=x, 2=y, 3=z). MPI ghosts come via s_mpi_sendrecv_variables_buffers; BC_GHOST_EXTRAP
     !! faces are re-extrapolated from the current edge cell.
     impure subroutine s_lso_pp_filter_ghost_refresh(q_cons_vf, mpi_dir)
 
         type(scalar_field), intent(inout) :: q_cons_vf(:)
         integer, intent(in)               :: mpi_dir
-        integer                           :: i, j, k, l, beg_bc, end_bc
+        integer                           :: i, j, k, l, beg_bc, end_bc, nv
+
+        nv = size(q_cons_vf)
 
         select case (mpi_dir)
         case (1)
@@ -193,14 +257,14 @@ contains
         end select
 
 #ifdef MFC_MPI
-        if (beg_bc >= 0) call s_mpi_sendrecv_variables_buffers(q_cons_vf, mpi_dir, -1, sys_size)
-        if (end_bc >= 0) call s_mpi_sendrecv_variables_buffers(q_cons_vf, mpi_dir, 1, sys_size)
+        if (beg_bc >= 0) call s_mpi_sendrecv_variables_buffers(q_cons_vf, mpi_dir, -1, nv)
+        if (end_bc >= 0) call s_mpi_sendrecv_variables_buffers(q_cons_vf, mpi_dir, 1, nv)
 #endif
 
         select case (mpi_dir)
         case (1)
             if (beg_bc == BC_GHOST_EXTRAP) then
-                do i = 1, sys_size
+                do i = 1, nv
                     do l = 0, p
                         do k = 0, n
                             do j = 1, buff_size
@@ -211,7 +275,7 @@ contains
                 end do
             end if
             if (end_bc == BC_GHOST_EXTRAP) then
-                do i = 1, sys_size
+                do i = 1, nv
                     do l = 0, p
                         do k = 0, n
                             do j = 1, buff_size
@@ -223,7 +287,7 @@ contains
             end if
         case (2)
             if (beg_bc == BC_GHOST_EXTRAP) then
-                do i = 1, sys_size
+                do i = 1, nv
                     do l = 0, p
                         do k = 1, buff_size
                             do j = 0, m
@@ -234,7 +298,7 @@ contains
                 end do
             end if
             if (end_bc == BC_GHOST_EXTRAP) then
-                do i = 1, sys_size
+                do i = 1, nv
                     do l = 0, p
                         do k = 1, buff_size
                             do j = 0, m
@@ -246,7 +310,7 @@ contains
             end if
         case (3)
             if (beg_bc == BC_GHOST_EXTRAP) then
-                do i = 1, sys_size
+                do i = 1, nv
                     do l = 1, buff_size
                         do k = 0, n
                             do j = 0, m
@@ -257,7 +321,7 @@ contains
                 end do
             end if
             if (end_bc == BC_GHOST_EXTRAP) then
-                do i = 1, sys_size
+                do i = 1, nv
                     do l = 1, buff_size
                         do k = 0, n
                             do j = 0, m

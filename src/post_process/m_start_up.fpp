@@ -878,11 +878,12 @@ contains
 
     !> Read lso_stat_<t_step>.dat (n_stat MPI-IO subarrays back-to-back) into q_stat_vf. Sets found = .false. when the file is
     !! missing.
-    impure subroutine s_read_lso_stat_file(q_stat_vf, n_stat, t_step, found)
+    impure subroutine s_read_lso_stat_file(q_stat_vf, n_stat, t_step, found, fname)
 
-        type(scalar_field), intent(inout) :: q_stat_vf(:)
-        integer, intent(in)               :: n_stat, t_step
-        logical, intent(out)              :: found
+        type(scalar_field), intent(inout)      :: q_stat_vf(:)
+        integer, intent(in)                    :: n_stat, t_step
+        logical, intent(out)                   :: found
+        character(LEN=*), intent(in), optional :: fname  !< file basename prefix (default 'lso_stat_')
 
 #ifdef MFC_MPI
         integer                              :: ifile, ierr, data_size, i
@@ -911,7 +912,11 @@ contains
         WP_MOK = int(storage_size(0._stp)/8, MPI_OFFSET_KIND)
         MOK = int(1._wp, MPI_OFFSET_KIND)
 
-        write (file_loc, '(A,I0,A)') 'lso_stat_', t_step, '.dat'
+        if (present(fname)) then
+            write (file_loc, '(A,I0,A)') trim(fname), t_step, '.dat'
+        else
+            write (file_loc, '(A,I0,A)') 'lso_stat_', t_step, '.dat'
+        end if
         file_loc = trim(case_dir) // '/restart_data' // trim(mpiiofs) // trim(file_loc)
         inquire (FILE=trim(file_loc), EXIST=file_exist)
         if (.not. file_exist) then
@@ -940,6 +945,41 @@ contains
 #endif
 
     end subroutine s_read_lso_stat_file
+
+    !> Read the simulation-written stage-1 filtered gas-mask (lso_mask_<t>.dat) into the INTERIOR of w_vf (caller allocates
+    !! w_vf(1)%sf with ghost bounds). found is made collectively consistent so all ranks agree on whether to take the masked path.
+    impure subroutine s_read_lso_mask(w_vf, t_step, found)
+
+        type(scalar_field), intent(inout) :: w_vf(1:1)
+        integer, intent(in)               :: t_step
+        logical, intent(out)              :: found
+        type(scalar_field)                :: w_io(1:1)
+        integer                           :: j, k, l
+
+        allocate (w_io(1)%sf(0:m,0:n,0:p))
+        call s_read_lso_stat_file(w_io, 1, t_step, found, 'lso_mask_')
+
+#ifdef MFC_MPI
+        block
+            integer :: found_int, found_min, ierr
+            found_int = merge(1, 0, found)
+            call MPI_ALLREDUCE(found_int, found_min, 1, MPI_INTEGER, MPI_MIN, MPI_COMM_WORLD, ierr)
+            found = (found_min == 1)
+        end block
+#endif
+
+        if (found) then
+            do l = 0, p
+                do k = 0, n
+                    do j = 0, m
+                        w_vf(1)%sf(j, k, l) = w_io(1)%sf(j, k, l)
+                    end do
+                end do
+            end do
+        end if
+        deallocate (w_io(1)%sf)
+
+    end subroutine s_read_lso_mask
 
     !> Read the lso_stat binary for t_step and emit each variable into silo_hdf5_lso_stat/. No-op when the file is missing (e.g.
     !! step 0 in cfl_dt mode).

@@ -25,7 +25,7 @@ module m_lso_filter
 
     public :: s_initialize_lso_filter_module, s_apply_lso_filter, s_copy_and_apply_lso_filter, s_lso_stride_sample, &
         & s_finalize_lso_filter_module, q_filt_vf, q_filt_ds_vf, q_lso_stat_vf, q_lso_stat_ds_vf, s_compute_lso_stat_fields, &
-        & s_lso_stat_stride_sample
+        & s_lso_stat_stride_sample, q_lso_mask_vf, q_lso_mask_ds_vf
 
     ! Scratch buffer for one directional pass (interior only).
     real(wp), allocatable, dimension(:,:,:) :: lso_tmp
@@ -41,6 +41,11 @@ module m_lso_filter
 
     ! Coarsened version (lso_down_sample_factor > 1).
     type(scalar_field), allocatable :: q_filt_ds_vf(:)
+
+    ! Coarsened filtered gas-mask (the normalized-convolution weight w = filter(m)),
+    ! written alongside the filtered fields so post_process can compose an additional
+    ! filter exactly: filter2(w*qhat)/filter2(w).
+    type(scalar_field), allocatable :: q_lso_mask_ds_vf(:)
 
     ! Filtered statistical product fields (lso_stat_wrt = T).
     type(scalar_field), allocatable :: q_lso_stat_vf(:)
@@ -83,6 +88,10 @@ contains
                 do i = 1, sys_size
                     @:ALLOCATE(q_filt_ds_vf(i)%sf(0:m_lso_ds, 0:n_lso_ds, 0:p_lso_ds))
                 end do
+                if (ib) then
+                    @:ALLOCATE(q_lso_mask_ds_vf(1:1))
+                    @:ALLOCATE(q_lso_mask_ds_vf(1)%sf(0:m_lso_ds, 0:n_lso_ds, 0:p_lso_ds))
+                end if
             end if
 
             if (lso_stat_wrt .and. n_lso_stat > 0) then
@@ -145,6 +154,10 @@ contains
                     @:DEALLOCATE(q_filt_ds_vf(i)%sf)
                 end do
                 @:DEALLOCATE(q_filt_ds_vf)
+                if (ib) then
+                    @:DEALLOCATE(q_lso_mask_ds_vf(1)%sf)
+                    @:DEALLOCATE(q_lso_mask_ds_vf)
+                end if
             end if
 
             if (lso_stat_wrt .and. n_lso_stat > 0) then
@@ -259,6 +272,11 @@ contains
             call s_lso_filter_ghost_refresh(q_filt_vf, 1)
             if (n > 0) call s_lso_filter_ghost_refresh(q_filt_vf, 2)
             if (p > 0) call s_lso_filter_ghost_refresh(q_filt_vf, 3)
+            if (ib) then
+                call s_lso_filter_ghost_refresh(q_lso_mask_vf, 1)
+                if (n > 0) call s_lso_filter_ghost_refresh(q_lso_mask_vf, 2)
+                if (p > 0) call s_lso_filter_ghost_refresh(q_lso_mask_vf, 3)
+            end if
         end if
 
         if (lso_stat_wrt .and. n_lso_stat > 0) then
@@ -457,11 +475,12 @@ contains
 
         type(scalar_field), intent(in)    :: q_src_vf(:)
         type(scalar_field), intent(inout) :: q_dst_vf(:)
-        integer                           :: i, j, k, l
+        integer                           :: i, j, k, l, nv
         integer                           :: j0, j1, k0, k1, l0, l1
         real(wp)                          :: alpha, beta, gamma_pos, wj, wk, wl
 
-        do i = 1, sys_size
+        nv = size(q_src_vf)
+        do i = 1, nv
             do l = 0, p_lso_ds
                 ! Global-coordinate mapping (start_idx is the rank's global cell offset; the
                 ! coarse offset is start_idx/factor, matching the MPI-IO subarray start). This

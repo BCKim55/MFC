@@ -9,7 +9,9 @@ program p_main
     use m_start_up
     use m_data_output, only: s_switch_output_dirs
     use m_data_input, only: q_cons_vf
-    use m_lso_pp_filter, only: s_apply_lso_pp_filter, s_compute_lso_pp_stat_fields
+    use m_derived_types, only: scalar_field
+    use m_lso_pp_filter, only: s_apply_lso_pp_filter, s_compute_lso_pp_stat_fields, s_apply_lso_pp_filter_masked, &
+        & s_lso_pp_mask_from_ib
 
     implicit none
 
@@ -53,7 +55,33 @@ program p_main
         ! original full-resolution data (lso_filter_wrt=F; full target width). Output goes to silo_hdf5_lso/
         ! in both cases (s_save_data routes on lso_filter_wrt .or. lso_pp_filter).
         if (lso_pp_filter) then
-            call s_apply_lso_pp_filter(q_cons_vf)
+            ! IB-aware normalization weight: the stage-1 filtered mask for pre-filtered
+            ! input (exact two-stage composition), the binary ib_markers gas mask for
+            ! original input, or none (plain filter) when neither is available.
+            block
+                type(scalar_field) :: w_vf(1:1)
+                logical            :: have_w
+                have_w = .false.
+                allocate (w_vf(1)%sf(lbound(q_cons_vf(1)%sf, 1):ubound(q_cons_vf(1)%sf, 1),lbound(q_cons_vf(1)%sf, &
+                          & 2):ubound(q_cons_vf(1)%sf, 2),lbound(q_cons_vf(1)%sf, 3):ubound(q_cons_vf(1)%sf, 3)))
+                if (lso_filter_wrt) then
+                    call s_read_lso_mask(w_vf, t_step, have_w)
+                    if (.not. have_w .and. ib .and. proc_rank == 0) then
+                        print '(A)', &
+                            & ' WARNING: lso_mask file not found; post_process filter runs ' &
+                            & // 'without IB normalization (solid neighborhood will smear).'
+                    end if
+                else if (ib) then
+                    call s_lso_pp_mask_from_ib(w_vf)
+                    have_w = .true.
+                end if
+                if (have_w) then
+                    call s_apply_lso_pp_filter_masked(q_cons_vf, w_vf)
+                else
+                    call s_apply_lso_pp_filter(q_cons_vf)
+                end if
+                deallocate (w_vf(1)%sf)
+            end block
             call s_reconvert_filtered_to_primitive()
             if (lso_stat_wrt) call s_compute_lso_pp_stat_fields(q_cons_vf)
         end if
