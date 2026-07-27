@@ -1072,6 +1072,72 @@ contains
 
     end subroutine s_save_lso_closure_data
 
+    !> Closure fields for the POST-WIDENED data (lso_pp_filter = T): read the sigma1-width stat binary, apply the sigma2 pass to
+    !! every stat product (the filter is linear, so this yields the target-width filtered products exactly), then compute the
+    !! closures against the post-filtered conserved state and weight w2 = filter2(w1).
+    impure subroutine s_save_lso_pp_closure_data(t_step)
+
+        integer, intent(in)             :: t_step
+        type(scalar_field), allocatable :: q_io_vf(:), q_stat_vf(:), q_cls_vf(:)
+        logical                         :: found
+        integer                         :: i, c, j, k, l, n_cls
+
+        if (n_lso_stat <= 0) return
+
+        ! Read into interior-sized temporaries, then move into ghost-extended fields (the pp filter needs halo cells).
+        allocate (q_io_vf(1:n_lso_stat), q_stat_vf(1:n_lso_stat))
+        do i = 1, n_lso_stat
+            allocate (q_io_vf(i)%sf(0:m,0:n,0:p))
+            allocate (q_stat_vf(i)%sf(lbound(q_cons_vf(1)%sf, 1):ubound(q_cons_vf(1)%sf, 1),lbound(q_cons_vf(1)%sf, &
+                      & 2):ubound(q_cons_vf(1)%sf, 2),lbound(q_cons_vf(1)%sf, 3):ubound(q_cons_vf(1)%sf, 3)))
+        end do
+        call s_read_lso_stat_file(q_io_vf, n_lso_stat, t_step, found)
+#ifdef MFC_MPI
+        block
+            integer :: found_int, found_min, ierr
+            found_int = merge(1, 0, found)
+            call MPI_ALLREDUCE(found_int, found_min, 1, MPI_INTEGER, MPI_MIN, MPI_COMM_WORLD, ierr)
+            found = (found_min == 1)
+        end block
+#endif
+
+        if (found) then
+            do i = 1, n_lso_stat
+                do l = 0, p
+                    do k = 0, n
+                        do j = 0, m
+                            q_stat_vf(i)%sf(j, k, l) = q_io_vf(i)%sf(j, k, l)
+                        end do
+                    end do
+                end do
+            end do
+
+            ! sigma2 pass over all stat products, in chunks of sys_size fields so the
+            ! shared MPI halo buffers (sized for sys_size) are never exceeded.
+            do c = 1, n_lso_stat, sys_size
+                call s_apply_lso_pp_filter(q_stat_vf(c:min(c + sys_size - 1, n_lso_stat)))
+            end do
+
+            n_cls = f_lso_n_closure()
+            allocate (q_cls_vf(1:n_cls))
+            do i = 1, n_cls
+                allocate (q_cls_vf(i)%sf(0:m,0:n,0:p))
+            end do
+            call s_compute_lso_closure_fields(q_stat_vf, q_cons_vf, q_lso_pp_w_vf, q_cls_vf)
+            call s_write_lso_closure_fields(q_cls_vf, t_step)
+            do i = 1, n_cls
+                deallocate (q_cls_vf(i)%sf)
+            end do
+            deallocate (q_cls_vf)
+        end if
+
+        do i = 1, n_lso_stat
+            deallocate (q_io_vf(i)%sf, q_stat_vf(i)%sf)
+        end do
+        deallocate (q_io_vf, q_stat_vf)
+
+    end subroutine s_save_lso_pp_closure_data
+
     !> Emit the closure fields into silo_hdf5_lso_closure/ with ParaView-friendly names. Field order must match
     !! s_compute_lso_closure_fields / f_lso_n_closure.
     impure subroutine s_write_lso_closure_fields(q_cls_vf, t_step)

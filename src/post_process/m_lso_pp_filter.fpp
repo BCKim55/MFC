@@ -38,6 +38,11 @@ module m_lso_pp_filter
     ! Filtered stat fields (lso_stat_wrt = T).
     type(scalar_field), allocatable :: q_lso_pp_stat_vf(:)
 
+    ! Post-filtered normalization weight w2 = filter2(w1) (interior only), kept for the
+    ! closure pass so T_tilde can be built at the widened target width. Defaults to 1
+    ! (no-mask runs keep F[E] = E*1).
+    type(scalar_field), public :: q_lso_pp_w_vf(1:1)
+
 contains
 
     impure subroutine s_initialize_lso_pp_filter_module()
@@ -45,6 +50,11 @@ contains
         integer :: i
 
         allocate (lso_pp_tmp(0:m,0:n,0:p))
+
+        if (lso_pp_filter) then
+            allocate (q_lso_pp_w_vf(1)%sf(0:m,0:n,0:p))
+            q_lso_pp_w_vf(1)%sf = 1._stp
+        end if
 
         if (lso_stat_wrt .and. n_lso_stat > 0) then
             allocate (q_lso_pp_stat_vf(1:n_lso_stat))
@@ -60,6 +70,7 @@ contains
         integer :: i
 
         if (allocated(lso_pp_tmp)) deallocate (lso_pp_tmp)
+        if (associated(q_lso_pp_w_vf(1)%sf)) deallocate (q_lso_pp_w_vf(1)%sf)
 
         if (allocated(q_lso_pp_stat_vf)) then
             do i = 1, n_lso_stat
@@ -221,6 +232,15 @@ contains
 
         call s_apply_lso_pp_filter(q_cons_vf)  ! numerator   filter(w*q)
         call s_apply_lso_pp_filter(w_vf)  ! denominator filter(w)
+
+        ! Keep w2 = filter2(w1) for the closure pass (F[E] = E_pp * w2 at target width).
+        do l = 0, p
+            do k = 0, n
+                do j = 0, m
+                    q_lso_pp_w_vf(1)%sf(j, k, l) = w_vf(1)%sf(j, k, l)
+                end do
+            end do
+        end do
 
         do i = 1, sys_size
             do l = 0, p

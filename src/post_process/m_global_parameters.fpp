@@ -860,6 +860,11 @@ contains
             buff_size = buff_size + fd_number
         end if
 
+        ! The LSO post filter applies a 9-point (radius-4) stencil to q_cons_vf, and the
+        ! closure pass takes centred gradients of ghost-refreshed Favre fields; both need
+        ! at least 4 ghost layers regardless of the output-derived buffer size above.
+        if (lso_pp_filter .or. lso_closure_wrt) buff_size = max(buff_size, 4)
+
         ! Configuring Coordinate Direction Indexes
         idwint(1)%beg = 0; idwint(2)%beg = 0; idwint(3)%beg = 0
         idwint(1)%end = m; idwint(2)%end = n; idwint(3)%end = p

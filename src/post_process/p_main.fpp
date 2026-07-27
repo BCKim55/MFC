@@ -119,11 +119,18 @@ program p_main
         ! so it requires the plain lso_filter_wrt path (no post filtering of the input).
         if (lso_closure_wrt) then
             if (lso_filter_wrt .and. lso_stat_wrt .and. .not. lso_pp_filter) then
+                ! In-situ width: closures straight from the stat binary.
                 call s_save_lso_closure_data(t_step)
+            else if (lso_filter_wrt .and. lso_stat_wrt .and. lso_pp_filter .and. lso_down_sample_factor > 1) then
+                ! Post-widened width: sigma2-filter the stat products first (linear, so
+                ! this is the exact target-width filter of the fine-grid products).
+                ! factor <= 1 is excluded: the secondary pass above reloaded unfiltered
+                ! data into q_cons_vf, which would mix widths in the closure inputs.
+                call s_save_lso_pp_closure_data(t_step)
             else if (proc_rank == 0 .and. t_step == t_step_start) then
                 print '(A)', &
-                    & ' WARNING: lso_closure_wrt requires lso_filter_wrt=T, ' &
-                    & // 'lso_stat_wrt=T and lso_pp_filter=F; closure output skipped.'
+                    & ' WARNING: lso_closure_wrt requires lso_filter_wrt=T and ' &
+                    & // 'lso_stat_wrt=T (with lso_pp_filter=T also lso_down_sample_factor>1); ' // 'closure output skipped.'
             end if
         end if
 
