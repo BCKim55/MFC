@@ -114,6 +114,19 @@ program p_main
             end if
         end if
 
+        ! Fourth pass: Euler-Lagrange closure fields to silo_hdf5_lso_closure/. Uses the
+        ! simulation-written stat binary + the read filtered conserved state + the mask,
+        ! so it requires the plain lso_filter_wrt path (no post filtering of the input).
+        if (lso_closure_wrt) then
+            if (lso_filter_wrt .and. lso_stat_wrt .and. .not. lso_pp_filter) then
+                call s_save_lso_closure_data(t_step)
+            else if (proc_rank == 0 .and. t_step == t_step_start) then
+                print '(A)', &
+                    & ' WARNING: lso_closure_wrt requires lso_filter_wrt=T, ' &
+                    & // 'lso_stat_wrt=T and lso_pp_filter=F; closure output skipped.'
+            end if
+        end if
+
         call cpu_time(finish)
 
         wall_time = abs(finish - start)

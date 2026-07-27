@@ -72,8 +72,8 @@ contains
             & igr_order, down_sample, recon_type, muscl_order, lag_header, lag_txt_wrt, lag_db_wrt, lag_id_wrt, lag_pos_wrt, &
             & lag_pos_prev_wrt, lag_vel_wrt, lag_rad_wrt, lag_rvel_wrt, lag_r0_wrt, lag_rmax_wrt, lag_rmin_wrt, lag_dphidt_wrt, &
             & lag_pres_wrt, lag_mv_wrt, lag_mg_wrt, lag_betaT_wrt, lag_betaC_wrt, alpha_rho_e_wrt, ib_state_wrt, lso_filter_wrt, &
-            & lso_down_sample_factor, lso_stat_wrt, lso_pp_filter, lso_pp_n_passes_x, lso_pp_n_passes_y, lso_pp_n_passes_z, &
-            & lso_pp_a_x, lso_pp_a_y, lso_pp_a_z, lso_R_gas, lso_mu, lso_conductivity
+            & lso_down_sample_factor, lso_stat_wrt, lso_pp_filter, lso_closure_wrt, lso_pp_n_passes_x, lso_pp_n_passes_y, &
+            & lso_pp_n_passes_z, lso_pp_a_x, lso_pp_a_y, lso_pp_a_z, lso_R_gas, lso_mu, lso_conductivity
 
         file_loc = 'post_process.inp'
         inquire (FILE=trim(file_loc), EXIST=file_check)
@@ -1018,6 +1018,134 @@ contains
 
     end subroutine s_save_lso_stat_data
 
+    !> Compute the Euler-Lagrange closure fields from the simulation-written LSO stat binary (+ filtered conserved data and mask)
+    !! and write them to silo_hdf5_lso_closure/. No-op when the stat file is missing.
+    impure subroutine s_save_lso_closure_data(t_step)
+
+        integer, intent(in)             :: t_step
+        type(scalar_field), allocatable :: q_stat_vf(:), q_cls_vf(:)
+        type(scalar_field)              :: w_vf(1:1)
+        logical                         :: found, found_w
+        integer                         :: i, n_cls
+
+        if (n_lso_stat <= 0) return
+
+        allocate (q_stat_vf(1:n_lso_stat))
+        do i = 1, n_lso_stat
+            allocate (q_stat_vf(i)%sf(0:m,0:n,0:p))
+        end do
+        call s_read_lso_stat_file(q_stat_vf, n_lso_stat, t_step, found)
+#ifdef MFC_MPI
+        block
+            integer :: found_int, found_min, ierr
+            found_int = merge(1, 0, found)
+            call MPI_ALLREDUCE(found_int, found_min, 1, MPI_INTEGER, MPI_MIN, MPI_COMM_WORLD, ierr)
+            found = (found_min == 1)
+        end block
+#endif
+
+        if (found) then
+            allocate (w_vf(1)%sf(0:m,0:n,0:p))
+            call s_read_lso_mask(w_vf, t_step, found_w)
+            if (.not. found_w) w_vf(1)%sf = 1._stp  ! no-IB runs write no mask; w = 1
+
+            n_cls = f_lso_n_closure()
+            allocate (q_cls_vf(1:n_cls))
+            do i = 1, n_cls
+                allocate (q_cls_vf(i)%sf(0:m,0:n,0:p))
+            end do
+
+            call s_compute_lso_closure_fields(q_stat_vf, q_cons_vf, w_vf, q_cls_vf)
+            call s_write_lso_closure_fields(q_cls_vf, t_step)
+
+            do i = 1, n_cls
+                deallocate (q_cls_vf(i)%sf)
+            end do
+            deallocate (q_cls_vf)
+            deallocate (w_vf(1)%sf)
+        end if
+
+        do i = 1, n_lso_stat
+            deallocate (q_stat_vf(i)%sf)
+        end do
+        deallocate (q_stat_vf)
+
+    end subroutine s_save_lso_closure_data
+
+    !> Emit the closure fields into silo_hdf5_lso_closure/ with ParaView-friendly names. Field order must match
+    !! s_compute_lso_closure_fields / f_lso_n_closure.
+    impure subroutine s_write_lso_closure_fields(q_cls_vf, t_step)
+
+        type(scalar_field), intent(in) :: q_cls_vf(:)
+        integer, intent(in)            :: t_step
+        character(LEN=name_len)        :: varname
+        character(LEN=2)               :: tc(6)
+        character(LEN=1)               :: dc(3)
+        integer                        :: nd, nt, c, a, idx
+
+        nd = num_dims
+        nt = nd*(nd + 1)/2
+        dc = (/'x', 'y', 'z'/)
+        if (nd == 3) then
+            tc(1:6) = (/'11', '12', '13', '22', '23', '33'/)
+        else
+            tc(1:3) = (/'11', '12', '22'/)
+        end if
+
+        call s_switch_to_lso_stat_dir('silo_hdf5_lso_closure')
+        call s_open_formatted_database_file(t_step)
+        call s_write_grid_to_formatted_database_file(t_step)
+
+        idx = 0
+        do c = 1, nt
+            idx = idx + 1
+            varname = 'R_sg_' // tc(c)
+            call s_put_lso_var(q_cls_vf(idx))
+            call s_write_variable_to_formatted_database_file(varname, t_step)
+        end do
+        do a = 1, nd
+            idx = idx + 1
+            varname = 'Q_T_' // dc(a)
+            call s_put_lso_var(q_cls_vf(idx))
+            call s_write_variable_to_formatted_database_file(varname, t_step)
+        end do
+        do a = 1, nd
+            idx = idx + 1
+            varname = 'E_ku_' // dc(a)
+            call s_put_lso_var(q_cls_vf(idx))
+            call s_write_variable_to_formatted_database_file(varname, t_step)
+        end do
+        do a = 1, nd
+            idx = idx + 1
+            varname = 'W_tau_u_' // dc(a)
+            call s_put_lso_var(q_cls_vf(idx))
+            call s_write_variable_to_formatted_database_file(varname, t_step)
+        end do
+        do c = 1, nt
+            idx = idx + 1
+            varname = 'R_mu_sg_' // tc(c)
+            call s_put_lso_var(q_cls_vf(idx))
+            call s_write_variable_to_formatted_database_file(varname, t_step)
+        end do
+        do a = 1, nd
+            idx = idx + 1
+            varname = 'R_lam_sg_' // dc(a)
+            call s_put_lso_var(q_cls_vf(idx))
+            call s_write_variable_to_formatted_database_file(varname, t_step)
+        end do
+        idx = idx + 1
+        varname = 'T_tilde'
+        call s_put_lso_var(q_cls_vf(idx))
+        call s_write_variable_to_formatted_database_file(varname, t_step)
+        do a = 1, nd
+            idx = idx + 1
+            varname = 'u_favre_' // dc(a)
+            call s_put_lso_var(q_cls_vf(idx))
+            call s_write_variable_to_formatted_database_file(varname, t_step)
+        end do
+
+    end subroutine s_write_lso_closure_fields
+
     !> Write the post_process-computed LSO stat fields (q_lso_pp_stat_vf from m_lso_pp_filter) to silo_hdf5_lso_stat/. The fields
     !! are computed in-process by s_compute_lso_pp_stat_fields from the post_process-filtered conserved state, so no binary file
     !! read is required (unlike s_save_lso_stat_data).
@@ -1035,6 +1163,23 @@ contains
     !! (fields read from the simulation-written binary file) and s_save_lso_pp_stat_data (fields computed in-process from the
     !! post_process-filtered state). Switches to the lso_stat output directory, writes the grid and all variables, then restores the
     !! LSO directory for subsequent passes.
+    !> Copy a ghost-less LSO field into q_sf, replicating edge cells into the Silo offset (pad) region so multi-rank tiles carry no
+    !! zero seams.
+    impure subroutine s_put_lso_var(fld)
+
+        type(scalar_field), intent(in) :: fld
+        integer                        :: j, k, l
+
+        do l = lbound(q_sf, 3), ubound(q_sf, 3)
+            do k = lbound(q_sf, 2), ubound(q_sf, 2)
+                do j = lbound(q_sf, 1), ubound(q_sf, 1)
+                    q_sf(j, k, l) = real(fld%sf(min(max(j, 0), m), min(max(k, 0), n), min(max(l, 0), p)), wp)
+                end do
+            end do
+        end do
+
+    end subroutine s_put_lso_var
+
     impure subroutine s_write_lso_stat_fields(q_stat_vf, t_step)
 
         type(scalar_field), intent(in) :: q_stat_vf(:)
@@ -1047,154 +1192,154 @@ contains
 
         ! phi_p
         varname = 'phi_p'
-        q_sf(0:m,0:n,0:p) = real(q_stat_vf(lso_stat_phi_p_beg)%sf(0:m,0:n,0:p), wp)
+        call s_put_lso_var(q_stat_vf(lso_stat_phi_p_beg))
         call s_write_variable_to_formatted_database_file(varname, t_step)
 
         ! rho scalar (gas_mask * rho)
         varname = 'rho'
-        q_sf(0:m,0:n,0:p) = real(q_stat_vf(lso_stat_rho_beg)%sf(0:m,0:n,0:p), wp)
+        call s_put_lso_var(q_stat_vf(lso_stat_rho_beg))
         call s_write_variable_to_formatted_database_file(varname, t_step)
 
         ! rhoke scalar (gas_mask * (mom1^2+mom2^2+mom3^2)/rho)
         varname = 'rho_ke'
-        q_sf(0:m,0:n,0:p) = real(q_stat_vf(lso_stat_rhoke_beg)%sf(0:m,0:n,0:p), wp)
+        call s_put_lso_var(q_stat_vf(lso_stat_rhoke_beg))
         call s_write_variable_to_formatted_database_file(varname, t_step)
 
         ! phi_p * u_p
         varname = 'phi_p_up_x'
-        q_sf(0:m,0:n,0:p) = real(q_stat_vf(lso_stat_up_beg)%sf(0:m,0:n,0:p), wp)
+        call s_put_lso_var(q_stat_vf(lso_stat_up_beg))
         call s_write_variable_to_formatted_database_file(varname, t_step)
         if (num_dims >= 2) then
             varname = 'phi_p_up_y'
-            q_sf(0:m,0:n,0:p) = real(q_stat_vf(lso_stat_up_beg + 1)%sf(0:m,0:n,0:p), wp)
+            call s_put_lso_var(q_stat_vf(lso_stat_up_beg + 1))
             call s_write_variable_to_formatted_database_file(varname, t_step)
         end if
         if (num_dims == 3) then
             varname = 'phi_p_up_z'
-            q_sf(0:m,0:n,0:p) = real(q_stat_vf(lso_stat_up_beg + 2)%sf(0:m,0:n,0:p), wp)
+            call s_put_lso_var(q_stat_vf(lso_stat_up_beg + 2))
             call s_write_variable_to_formatted_database_file(varname, t_step)
         end if
 
         ! rho*u
         varname = 'rho_u_x'
-        q_sf(0:m,0:n,0:p) = real(q_stat_vf(lso_stat_rhou_beg)%sf(0:m,0:n,0:p), wp)
+        call s_put_lso_var(q_stat_vf(lso_stat_rhou_beg))
         call s_write_variable_to_formatted_database_file(varname, t_step)
         if (num_dims >= 2) then
             varname = 'rho_u_y'
-            q_sf(0:m,0:n,0:p) = real(q_stat_vf(lso_stat_rhou_beg + 1)%sf(0:m,0:n,0:p), wp)
+            call s_put_lso_var(q_stat_vf(lso_stat_rhou_beg + 1))
             call s_write_variable_to_formatted_database_file(varname, t_step)
         end if
         if (num_dims == 3) then
             varname = 'rho_u_z'
-            q_sf(0:m,0:n,0:p) = real(q_stat_vf(lso_stat_rhou_beg + 2)%sf(0:m,0:n,0:p), wp)
+            call s_put_lso_var(q_stat_vf(lso_stat_rhou_beg + 2))
             call s_write_variable_to_formatted_database_file(varname, t_step)
         end if
 
         ! rho*u*u upper triangle
         varname = 'rho_uu_11'
-        q_sf(0:m,0:n,0:p) = real(q_stat_vf(lso_stat_rhouu_beg)%sf(0:m,0:n,0:p), wp)
+        call s_put_lso_var(q_stat_vf(lso_stat_rhouu_beg))
         call s_write_variable_to_formatted_database_file(varname, t_step)
         if (num_dims >= 2) then
             varname = 'rho_uu_12'
-            q_sf(0:m,0:n,0:p) = real(q_stat_vf(lso_stat_rhouu_beg + 1)%sf(0:m,0:n,0:p), wp)
+            call s_put_lso_var(q_stat_vf(lso_stat_rhouu_beg + 1))
             call s_write_variable_to_formatted_database_file(varname, t_step)
             varname = 'rho_uu_22'
-            q_sf(0:m,0:n,0:p) = real(q_stat_vf(lso_stat_rhouu_beg + 2)%sf(0:m,0:n,0:p), wp)
+            call s_put_lso_var(q_stat_vf(lso_stat_rhouu_beg + 2))
             call s_write_variable_to_formatted_database_file(varname, t_step)
         end if
         if (num_dims == 3) then
             varname = 'rho_uu_13'
-            q_sf(0:m,0:n,0:p) = real(q_stat_vf(lso_stat_rhouu_beg + 3)%sf(0:m,0:n,0:p), wp)
+            call s_put_lso_var(q_stat_vf(lso_stat_rhouu_beg + 3))
             call s_write_variable_to_formatted_database_file(varname, t_step)
             varname = 'rho_uu_23'
-            q_sf(0:m,0:n,0:p) = real(q_stat_vf(lso_stat_rhouu_beg + 4)%sf(0:m,0:n,0:p), wp)
+            call s_put_lso_var(q_stat_vf(lso_stat_rhouu_beg + 4))
             call s_write_variable_to_formatted_database_file(varname, t_step)
             varname = 'rho_uu_33'
-            q_sf(0:m,0:n,0:p) = real(q_stat_vf(lso_stat_rhouu_beg + 5)%sf(0:m,0:n,0:p), wp)
+            call s_put_lso_var(q_stat_vf(lso_stat_rhouu_beg + 5))
             call s_write_variable_to_formatted_database_file(varname, t_step)
         end if
 
         ! rho*u*|u|^2
         varname = 'rho_uke_x'
-        q_sf(0:m,0:n,0:p) = real(q_stat_vf(lso_stat_rhouke_beg)%sf(0:m,0:n,0:p), wp)
+        call s_put_lso_var(q_stat_vf(lso_stat_rhouke_beg))
         call s_write_variable_to_formatted_database_file(varname, t_step)
         if (num_dims >= 2) then
             varname = 'rho_uke_y'
-            q_sf(0:m,0:n,0:p) = real(q_stat_vf(lso_stat_rhouke_beg + 1)%sf(0:m,0:n,0:p), wp)
+            call s_put_lso_var(q_stat_vf(lso_stat_rhouke_beg + 1))
             call s_write_variable_to_formatted_database_file(varname, t_step)
         end if
         if (num_dims == 3) then
             varname = 'rho_uke_z'
-            q_sf(0:m,0:n,0:p) = real(q_stat_vf(lso_stat_rhouke_beg + 2)%sf(0:m,0:n,0:p), wp)
+            call s_put_lso_var(q_stat_vf(lso_stat_rhouke_beg + 2))
             call s_write_variable_to_formatted_database_file(varname, t_step)
         end if
 
         ! rho*u*T
         varname = 'rho_uT_x'
-        q_sf(0:m,0:n,0:p) = real(q_stat_vf(lso_stat_rhouT_beg)%sf(0:m,0:n,0:p), wp)
+        call s_put_lso_var(q_stat_vf(lso_stat_rhouT_beg))
         call s_write_variable_to_formatted_database_file(varname, t_step)
         if (num_dims >= 2) then
             varname = 'rho_uT_y'
-            q_sf(0:m,0:n,0:p) = real(q_stat_vf(lso_stat_rhouT_beg + 1)%sf(0:m,0:n,0:p), wp)
+            call s_put_lso_var(q_stat_vf(lso_stat_rhouT_beg + 1))
             call s_write_variable_to_formatted_database_file(varname, t_step)
         end if
         if (num_dims == 3) then
             varname = 'rho_uT_z'
-            q_sf(0:m,0:n,0:p) = real(q_stat_vf(lso_stat_rhouT_beg + 2)%sf(0:m,0:n,0:p), wp)
+            call s_put_lso_var(q_stat_vf(lso_stat_rhouT_beg + 2))
             call s_write_variable_to_formatted_database_file(varname, t_step)
         end if
 
         ! tau (same layout as rho_uu)
         varname = 'tau_11'
-        q_sf(0:m,0:n,0:p) = real(q_stat_vf(lso_stat_tau_beg)%sf(0:m,0:n,0:p), wp)
+        call s_put_lso_var(q_stat_vf(lso_stat_tau_beg))
         call s_write_variable_to_formatted_database_file(varname, t_step)
         if (num_dims >= 2) then
             varname = 'tau_12'
-            q_sf(0:m,0:n,0:p) = real(q_stat_vf(lso_stat_tau_beg + 1)%sf(0:m,0:n,0:p), wp)
+            call s_put_lso_var(q_stat_vf(lso_stat_tau_beg + 1))
             call s_write_variable_to_formatted_database_file(varname, t_step)
             varname = 'tau_22'
-            q_sf(0:m,0:n,0:p) = real(q_stat_vf(lso_stat_tau_beg + 2)%sf(0:m,0:n,0:p), wp)
+            call s_put_lso_var(q_stat_vf(lso_stat_tau_beg + 2))
             call s_write_variable_to_formatted_database_file(varname, t_step)
         end if
         if (num_dims == 3) then
             varname = 'tau_13'
-            q_sf(0:m,0:n,0:p) = real(q_stat_vf(lso_stat_tau_beg + 3)%sf(0:m,0:n,0:p), wp)
+            call s_put_lso_var(q_stat_vf(lso_stat_tau_beg + 3))
             call s_write_variable_to_formatted_database_file(varname, t_step)
             varname = 'tau_23'
-            q_sf(0:m,0:n,0:p) = real(q_stat_vf(lso_stat_tau_beg + 4)%sf(0:m,0:n,0:p), wp)
+            call s_put_lso_var(q_stat_vf(lso_stat_tau_beg + 4))
             call s_write_variable_to_formatted_database_file(varname, t_step)
             varname = 'tau_33'
-            q_sf(0:m,0:n,0:p) = real(q_stat_vf(lso_stat_tau_beg + 5)%sf(0:m,0:n,0:p), wp)
+            call s_put_lso_var(q_stat_vf(lso_stat_tau_beg + 5))
             call s_write_variable_to_formatted_database_file(varname, t_step)
         end if
 
         ! q_i
         varname = 'q_x'
-        q_sf(0:m,0:n,0:p) = real(q_stat_vf(lso_stat_q_beg)%sf(0:m,0:n,0:p), wp)
+        call s_put_lso_var(q_stat_vf(lso_stat_q_beg))
         call s_write_variable_to_formatted_database_file(varname, t_step)
         if (num_dims >= 2) then
             varname = 'q_y'
-            q_sf(0:m,0:n,0:p) = real(q_stat_vf(lso_stat_q_beg + 1)%sf(0:m,0:n,0:p), wp)
+            call s_put_lso_var(q_stat_vf(lso_stat_q_beg + 1))
             call s_write_variable_to_formatted_database_file(varname, t_step)
         end if
         if (num_dims == 3) then
             varname = 'q_z'
-            q_sf(0:m,0:n,0:p) = real(q_stat_vf(lso_stat_q_beg + 2)%sf(0:m,0:n,0:p), wp)
+            call s_put_lso_var(q_stat_vf(lso_stat_q_beg + 2))
             call s_write_variable_to_formatted_database_file(varname, t_step)
         end if
 
         ! (tau u)_i
         varname = 'rho_tau_u_x'
-        q_sf(0:m,0:n,0:p) = real(q_stat_vf(lso_stat_rhotau_u_beg)%sf(0:m,0:n,0:p), wp)
+        call s_put_lso_var(q_stat_vf(lso_stat_rhotau_u_beg))
         call s_write_variable_to_formatted_database_file(varname, t_step)
         if (num_dims >= 2) then
             varname = 'rho_tau_u_y'
-            q_sf(0:m,0:n,0:p) = real(q_stat_vf(lso_stat_rhotau_u_beg + 1)%sf(0:m,0:n,0:p), wp)
+            call s_put_lso_var(q_stat_vf(lso_stat_rhotau_u_beg + 1))
             call s_write_variable_to_formatted_database_file(varname, t_step)
         end if
         if (num_dims == 3) then
             varname = 'rho_tau_u_z'
-            q_sf(0:m,0:n,0:p) = real(q_stat_vf(lso_stat_rhotau_u_beg + 2)%sf(0:m,0:n,0:p), wp)
+            call s_put_lso_var(q_stat_vf(lso_stat_rhotau_u_beg + 2))
             call s_write_variable_to_formatted_database_file(varname, t_step)
         end if
 

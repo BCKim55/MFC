@@ -357,13 +357,18 @@ contains
     end subroutine s_switch_output_dirs
 
     !> Point Silo at silo_hdf5_lso_stat/ for LSO stat output.
-    impure subroutine s_switch_to_lso_stat_dir
+    impure subroutine s_switch_to_lso_stat_dir(dirname)
 
-        character(LEN=path_len + 3*name_len) :: file_loc
-        logical                              :: dir_check
+        character(LEN=*), intent(in), optional :: dirname  !< default 'silo_hdf5_lso_stat'
+        character(LEN=path_len + 3*name_len)   :: file_loc
+        logical                                :: dir_check
 
         if (format == 1) then
-            dbdir = trim(case_dir) // '/silo_hdf5_lso_stat'
+            if (present(dirname)) then
+                dbdir = trim(case_dir) // '/' // trim(dirname)
+            else
+                dbdir = trim(case_dir) // '/silo_hdf5_lso_stat'
+            end if
 
             write (proc_rank_dir, '(A,I0)') '/p', proc_rank
             proc_rank_dir = trim(dbdir) // trim(proc_rank_dir)

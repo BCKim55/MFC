@@ -223,6 +223,7 @@ module m_global_parameters
     !> @{
     integer, parameter :: lso_max_passes = 60  !< Maximum number of filter passes (must match Python LSO_MAX_PASSES)
     logical            :: lso_pp_filter  !< Apply additional FIR filter in post_process before writing silo_hdf5_lso/
+    logical            :: lso_closure_wrt  !< Compute and write Euler-Lagrange closure fields to silo_hdf5_lso_closure/
     integer            :: lso_pp_n_passes_x  !< Number of post-process filter passes in x
     integer            :: lso_pp_n_passes_y  !< Number of post-process filter passes in y
     integer            :: lso_pp_n_passes_z  !< Number of post-process filter passes in z
@@ -461,6 +462,7 @@ contains
         lso_stat_q_beg = 0; lso_stat_q_end = 0
         lso_stat_rhotau_u_beg = 0; lso_stat_rhotau_u_end = 0
         lso_pp_filter = .false.
+        lso_closure_wrt = .false.
         lso_pp_n_passes_x = 0
         lso_pp_n_passes_y = 0
         lso_pp_n_passes_z = 0

@@ -270,6 +270,7 @@ DESCRIPTIONS = {
     "lso2_n_passes_z": "Coarse-grid stage-2 filter passes in z for the two-stage in-situ pyramid (auto-computed)",
     "lso2_a_x": "Stage-2 per-pass 9-point stencil coefficients in x (5 x lso_max_passes, auto-computed)",
     "lso2_a_y": "Stage-2 per-pass 9-point stencil coefficients in y (5 x lso_max_passes, auto-computed)",
+    "lso_closure_wrt": "Write Euler-Lagrange closure fields (R_sg, Q_T, E_ku, W_tau_u, R_mu_sg, R_lam_sg, T_tilde, u_favre) computed from the LSO stat data to silo_hdf5_lso_closure/",
     "lso2_a_z": "Stage-2 per-pass 9-point stencil coefficients in z (5 x lso_max_passes, auto-computed)",
     "lso_down_sample_factor": "Stride factor for coarsening the filtered output grid (1 = no coarsening)",
     "lso_stat_wrt": "Write filtered statistical fields (volume fraction, momentum, Reynolds stresses, heat fluxes) to lso_stat_<t>.dat. Requires lso_filter_wrt=True.",

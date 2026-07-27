@@ -29,7 +29,8 @@ module m_lso_pp_filter
     private
 
     public :: s_initialize_lso_pp_filter_module, s_finalize_lso_pp_filter_module, s_apply_lso_pp_filter, &
-        & s_compute_lso_pp_stat_fields, q_lso_pp_stat_vf, s_apply_lso_pp_filter_masked, s_lso_pp_mask_from_ib
+        & s_compute_lso_pp_stat_fields, q_lso_pp_stat_vf, s_apply_lso_pp_filter_masked, s_lso_pp_mask_from_ib, &
+        & s_compute_lso_closure_fields, f_lso_n_closure
 
     ! Scratch buffer for one directional pass.
     real(wp), allocatable :: lso_pp_tmp(:,:,:)
@@ -233,6 +234,155 @@ contains
         end do
 
     end subroutine s_apply_lso_pp_filter_masked
+
+    !> Number of closure output fields for the current dimensionality: R_sg (nt) | Q_T (nd) | E_ku (nd) | W_tau_u (nd) | R_mu_sg
+    !! (nt) | R_lam_sg (nd) | T_tilde (1) | u_favre (nd), with nt = 1/3/6 symmetric tensor components.
+    pure integer function f_lso_n_closure() result(n_cls)
+
+        integer :: nt
+
+        nt = num_dims*(num_dims + 1)/2
+        n_cls = 2*nt + 5*num_dims + 1
+
+    end function f_lso_n_closure
+
+    !> Euler-Lagrange closure fields from the LSO stat products (phase-weighted filters F[.]; rho_b = F[rho]; u_favre = F[rho
+    !! u]/rho_b; T_tilde from F[rho T] = (F[E] - 1/2 F[rho|u|^2])/Cv with F[E] = E_lso*w): R_sg,ij = F[rho u_i u_j] - F[rho u_i]
+    !! F[rho u_j]/rho_b Q_T,i = gamma*Cv*(F[rho u_i T] - T_tilde F[rho u_i]) E_ku,i = (F[rho u_i |u|^2] - F[rho u_i]/rho_b F[rho
+    !! |u|^2])/2 W_tau_u,i = (F[rho (tau.u)_i] - (tau_b . F[rho u])_i)/rho_b R_mu_sg = tau_b - mu_g[grad(u~)+grad(u~)^T -
+    !! (2/3)div(u~) I] R_lam_sg = q_b - (-lambda_g grad(T_tilde)) [stored q uses q = -lambda grad T] Gradients: centred differences
+    !! on the (quasi-uniform) output grid with ghost-refreshed Favre fields. Output layout matches f_lso_n_closure().
+    impure subroutine s_compute_lso_closure_fields(q_stat_vf, q_cons_vf, w_vf, q_cls_vf)
+
+        type(scalar_field), intent(in)    :: q_stat_vf(:), q_cons_vf(:), w_vf(1:1)
+        type(scalar_field), intent(inout) :: q_cls_vf(:)
+        type(scalar_field)                :: uT_vf(1:4)
+        integer                           :: nd, nt, i, c, j, k, l, a, b
+        integer                           :: ti(6), tj(6)
+        integer                           :: i_rsg, i_qt, i_eku, i_wtu, i_rmu, i_rlam, i_tt, i_uf
+        real(wp)                          :: Cv, gcv, rho_b, F_E, dsp(3)
+        real(wp)                          :: rhou(3), tdotru(3), dudx(3, 3), dT(3), div_u, tau_res, tb(3, 3)
+
+        nd = num_dims
+        nt = nd*(nd + 1)/2
+        ti(1:6) = (/1, 1, 1, 2, 2, 3/)
+        tj(1:6) = (/1, 2, 3, 2, 3, 3/)
+        if (nd == 2) then
+            ti(1:3) = (/1, 1, 2/); tj(1:3) = (/1, 2, 2/)
+        end if
+        i_rsg = 0; i_qt = i_rsg + nt; i_eku = i_qt + nd; i_wtu = i_eku + nd
+        i_rmu = i_wtu + nd; i_rlam = i_rmu + nt; i_tt = i_rlam + nd; i_uf = i_tt + 1
+
+        Cv = lso_R_gas*gammas(1)
+        gcv = (1._wp + 1._wp/gammas(1))*Cv
+
+        ! Favre velocity and temperature with ghost extents for the gradient stencils.
+        do i = 1, nd + 1
+            allocate (uT_vf(i)%sf(lbound(q_cons_vf(1)%sf, 1):ubound(q_cons_vf(1)%sf, 1),lbound(q_cons_vf(1)%sf, &
+                      & 2):ubound(q_cons_vf(1)%sf, 2),lbound(q_cons_vf(1)%sf, 3):ubound(q_cons_vf(1)%sf, 3)))
+        end do
+        do l = 0, p
+            do k = 0, n
+                do j = 0, m
+                    rho_b = max(real(q_stat_vf(lso_stat_rho_beg)%sf(j, k, l), wp), sgm_eps)
+                    do a = 1, nd
+                        uT_vf(a)%sf(j, k, l) = real(real(q_stat_vf(lso_stat_rhou_beg + a - 1)%sf(j, k, l), wp)/rho_b, stp)
+                    end do
+                    F_E = real(q_cons_vf(eqn_idx%E)%sf(j, k, l), wp)*real(w_vf(1)%sf(j, k, l), wp)
+                    uT_vf(nd + 1)%sf(j, k, l) = real((F_E - 0.5_wp*real(q_stat_vf(lso_stat_rhoke_beg)%sf(j, k, l), &
+                          & wp))/(Cv*rho_b), stp)
+                end do
+            end do
+        end do
+        call s_lso_pp_filter_ghost_refresh(uT_vf(1:nd + 1), 1)
+        if (n > 0) call s_lso_pp_filter_ghost_refresh(uT_vf(1:nd + 1), 2)
+        if (p > 0) call s_lso_pp_filter_ghost_refresh(uT_vf(1:nd + 1), 3)
+
+        ! Quasi-uniform output-grid spacing (mean; exact for integer decimation).
+        dsp = 1._wp
+        dsp(1) = (x_cc(m) - x_cc(0))/real(max(m, 1), wp)
+        if (n > 0) dsp(2) = (y_cc(n) - y_cc(0))/real(n, wp)
+        if (p > 0) dsp(3) = (z_cc(p) - z_cc(0))/real(p, wp)
+
+        do l = 0, p
+            do k = 0, n
+                do j = 0, m
+                    rho_b = max(real(q_stat_vf(lso_stat_rho_beg)%sf(j, k, l), wp), sgm_eps)
+                    rhou = 0._wp
+                    do a = 1, nd
+                        rhou(a) = real(q_stat_vf(lso_stat_rhou_beg + a - 1)%sf(j, k, l), wp)
+                    end do
+                    tb = 0._wp
+                    do c = 1, nt
+                        tb(ti(c), tj(c)) = real(q_stat_vf(lso_stat_tau_beg + c - 1)%sf(j, k, l), wp)
+                        tb(tj(c), ti(c)) = tb(ti(c), tj(c))
+                    end do
+
+                    ! gradients of the Favre fields (centred; ghosts filled above)
+                    dudx = 0._wp; dT = 0._wp
+                    do a = 1, nd
+                        dudx(a, 1) = (real(uT_vf(a)%sf(j + 1, k, l), wp) - real(uT_vf(a)%sf(j - 1, k, l), wp))/(2._wp*dsp(1))
+                        if (n > 0) dudx(a, 2) = (real(uT_vf(a)%sf(j, k + 1, l), wp) - real(uT_vf(a)%sf(j, k - 1, l), &
+                            & wp))/(2._wp*dsp(2))
+                        if (p > 0) dudx(a, 3) = (real(uT_vf(a)%sf(j, k, l + 1), wp) - real(uT_vf(a)%sf(j, k, l - 1), &
+                            & wp))/(2._wp*dsp(3))
+                    end do
+                    dT(1) = (real(uT_vf(nd + 1)%sf(j + 1, k, l), wp) - real(uT_vf(nd + 1)%sf(j - 1, k, l), wp))/(2._wp*dsp(1))
+                    if (n > 0) dT(2) = (real(uT_vf(nd + 1)%sf(j, k + 1, l), wp) - real(uT_vf(nd + 1)%sf(j, k - 1, l), &
+                        & wp))/(2._wp*dsp(2))
+                    if (p > 0) dT(3) = (real(uT_vf(nd + 1)%sf(j, k, l + 1), wp) - real(uT_vf(nd + 1)%sf(j, k, l - 1), &
+                        & wp))/(2._wp*dsp(3))
+                    div_u = 0._wp
+                    do a = 1, nd
+                        div_u = div_u + dudx(a, a)
+                    end do
+
+                    ! R_sg
+                    do c = 1, nt
+                        q_cls_vf(i_rsg + c)%sf(j, k, l) = real(real(q_stat_vf(lso_stat_rhouu_beg + c - 1)%sf(j, k, l), &
+                                 & wp) - rhou(ti(c))*rhou(tj(c))/rho_b, stp)
+                    end do
+                    ! Q_T, E_ku
+                    do a = 1, nd
+                        q_cls_vf(i_qt + a)%sf(j, k, l) = real(gcv*(real(q_stat_vf(lso_stat_rhouT_beg + a - 1)%sf(j, k, l), &
+                                 & wp) - real(uT_vf(nd + 1)%sf(j, k, l), wp)*rhou(a)), stp)
+                        q_cls_vf(i_eku + a)%sf(j, k, l) = real(0.5_wp*(real(q_stat_vf(lso_stat_rhouke_beg + a - 1)%sf(j, k, l), &
+                                 & wp) - rhou(a)/rho_b*real(q_stat_vf(lso_stat_rhoke_beg)%sf(j, k, l), wp)), stp)
+                    end do
+                    ! W_tau_u
+                    tdotru = 0._wp
+                    do a = 1, nd
+                        do b = 1, nd
+                            tdotru(a) = tdotru(a) + tb(a, b)*rhou(b)
+                        end do
+                        q_cls_vf(i_wtu + a)%sf(j, k, l) = real((real(q_stat_vf(lso_stat_rhotau_u_beg + a - 1)%sf(j, k, l), &
+                                 & wp) - tdotru(a))/rho_b, stp)
+                    end do
+                    ! R_mu_sg (filtered minus resolved, same tau convention as the solver)
+                    do c = 1, nt
+                        tau_res = lso_mu*(dudx(ti(c), tj(c)) + dudx(tj(c), ti(c)))
+                        if (ti(c) == tj(c)) tau_res = tau_res - (2._wp/3._wp)*lso_mu*div_u
+                        q_cls_vf(i_rmu + c)%sf(j, k, l) = real(tb(ti(c), tj(c)) - tau_res, stp)
+                    end do
+                    ! R_lam_sg (stored q = -lambda grad T; resolved uses the same sign)
+                    do a = 1, nd
+                        q_cls_vf(i_rlam + a)%sf(j, k, l) = real(real(q_stat_vf(lso_stat_q_beg + a - 1)%sf(j, k, l), &
+                                 & wp) - (-lso_conductivity*dT(a)), stp)
+                    end do
+                    ! T_tilde, u_favre
+                    q_cls_vf(i_tt + 1)%sf(j, k, l) = uT_vf(nd + 1)%sf(j, k, l)
+                    do a = 1, nd
+                        q_cls_vf(i_uf + a)%sf(j, k, l) = uT_vf(a)%sf(j, k, l)
+                    end do
+                end do
+            end do
+        end do
+
+        do i = 1, nd + 1
+            deallocate (uT_vf(i)%sf)
+        end do
+
+    end subroutine s_compute_lso_closure_fields
 
     !> Refresh ghosts for direction mpi_dir (1=x, 2=y, 3=z). MPI ghosts come via s_mpi_sendrecv_variables_buffers; BC_GHOST_EXTRAP
     !! faces are re-extrapolated from the current edge cell.

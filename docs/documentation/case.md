@@ -672,6 +672,7 @@ To restart the simulation from $k$-th time step, see @ref running "Restarting Ca
 | `lso2_a_x`              | Real    | Stage-2 per-pass stencil coefficients in x (auto-computed) |
 | `lso2_a_y`              | Real    | Stage-2 per-pass stencil coefficients in y (auto-computed) |
 | `lso2_a_z`              | Real    | Stage-2 per-pass stencil coefficients in z (auto-computed) |
+| `lso_closure_wrt`       | Logical | post_process: compute Euler–Lagrange closure fields (subgrid stress R_sg, temperature flux Q_T, kinetic-energy flux E_ku, viscous power W_tau_u, subgrid viscous stress R_mu_sg, subgrid heat flux R_lam_sg, plus T_tilde and Favre velocity) from the LSO stat data and write them to silo_hdf5_lso_closure/. Requires `lso_filter_wrt=T`, `lso_stat_wrt=T`, and `lso_pp_filter=F` |
 | `lso_pp_filter`         | Logical | Apply an additional LSO filter pass in post_process before writing output. Requires lso_filter_wrt=True. |
 | `lso_filter_sigma_in`   | Real    | Gaussian sigma (physical units) already applied to the input data. Defaults to the in-situ width (`filter_sigma`, or d_p/2) when reading filtered data (`lso_filter_wrt=T`), and to 0 when reading original data (`lso_filter_wrt=F`). The toolchain sizes the post_process pass for sqrt(target² − in²) |
 | `lso_filter_sigma_target`| Real   | Target Gaussian sigma (physical units) for the post_process filter; must be &gt; `lso_filter_sigma_in` |

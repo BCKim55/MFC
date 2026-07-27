@@ -102,7 +102,7 @@ contains
             & 'adv_n', 'ib', 'cfl_adap_dt', 'cfl_const_dt', 'cfl_dt',             &
             & 'surface_tension', 'hyperelasticity', 'bubbles_lagrange',           &
             & 'output_partial_domain', 'relativity', 'cont_damage', 'bc_io',      &
-            & 'down_sample','fft_wrt', 'hyper_cleaning', 'ib_state_wrt', 'lso_filter_wrt', 'lso_stat_wrt', &
+            & 'down_sample','fft_wrt', 'hyper_cleaning', 'ib_state_wrt', 'lso_filter_wrt', 'lso_stat_wrt', 'lso_closure_wrt', &
             & 'lso_pp_filter']
             call MPI_BCAST(${VAR}$, 1, MPI_LOGICAL, 0, MPI_COMM_WORLD, ierr)
         #:endfor
