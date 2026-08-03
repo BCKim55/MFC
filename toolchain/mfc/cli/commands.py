@@ -1348,6 +1348,83 @@ VIZ_COMMAND = Command(
     ],
 )
 
+REMAP_COMMAND = Command(
+    name="remap",
+    help="Remap restart fields onto a new rectilinear grid.",
+    description=(
+        "Interpolate conservative-variable fields from a parallel single-file "
+        "restart_data/LUSTRE step onto the uniform grid described by a target case. "
+        "This initial remap path supports parallel_io=T, file_per_process=F, "
+        "down_sample=F restart files."
+    ),
+    include_common=["debug_log"],
+    positionals=[
+        Positional(
+            name="source_case",
+            help="Source case.py that produced the restart_data directory.",
+            completion=Completion(type=CompletionType.FILES_PY),
+        ),
+        Positional(
+            name="target_case",
+            help="Target case.py whose uniform grid receives the remapped fields.",
+            completion=Completion(type=CompletionType.FILES_PY),
+        ),
+    ],
+    arguments=[
+        Argument(
+            name="step",
+            short="s",
+            help="Source restart timestep to read.",
+            type=int,
+            required=True,
+            metavar="STEP",
+        ),
+        Argument(
+            name="source-restart-dir",
+            help="Source restart_data directory (defaults to source case directory/restart_data).",
+            type=str,
+            default=None,
+            dest="source_restart_dir",
+            metavar="DIR",
+            completion=Completion(type=CompletionType.DIRECTORIES),
+        ),
+        Argument(
+            name="output-dir",
+            short="o",
+            help="Output restart_data directory (defaults to target case directory/restart_data).",
+            type=str,
+            default=None,
+            dest="output_dir",
+            metavar="DIR",
+            completion=Completion(type=CompletionType.DIRECTORIES),
+        ),
+        Argument(
+            name="output-step",
+            help="Output timestep filename to write.",
+            type=int,
+            default=0,
+            dest="output_step",
+            metavar="STEP",
+        ),
+        Argument(
+            name="force",
+            help="Replace the output restart_data directory if it already exists.",
+            action=ArgAction.STORE_TRUE,
+            default=False,
+        ),
+    ],
+    examples=[
+        Example("./mfc.sh remap old_case.py new_case.py --step 5000", "Write new_case restart_data/0.dat"),
+        Example("./mfc.sh remap old.py new.py -s 1000 -o remapped_restart --force", "Write to a custom directory"),
+    ],
+    key_options=[
+        ("-s, --step STEP", "Source restart timestep"),
+        ("-o, --output-dir DIR", "Output restart_data directory"),
+        ("--output-step STEP", "Output restart timestep filename"),
+        ("--force", "Replace existing output directory"),
+    ],
+)
+
 PARAMS_COMMAND = Command(
     name="params",
     help="Search and explore MFC case parameters.",
@@ -1484,6 +1561,7 @@ started, run `./mfc.sh build -h`.""",
         VALIDATE_COMMAND,
         NEW_COMMAND,
         VIZ_COMMAND,
+        REMAP_COMMAND,
         PARAMS_COMMAND,
         PACKER_COMMAND,
         COMPLETION_COMMAND,

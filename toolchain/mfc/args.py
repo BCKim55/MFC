@@ -170,7 +170,7 @@ def parse(config: MFCConfig):
             args["to"] = test_cases[-1].get_uuid()
 
     # Input files to absolute paths
-    for e in ["input", "input1", "input2"]:
+    for e in ["input", "input1", "input2", "source_case", "target_case"]:
         if e not in args:
             continue
 

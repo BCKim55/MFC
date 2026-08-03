@@ -198,6 +198,10 @@ def __run():
         from mfc import params_cmd
 
         params_cmd.params()
+    elif cmd == "remap":
+        from mfc import remap
+
+        remap.remap()
     elif cmd == "fp-stability":
         from mfc import fp_stability
 
