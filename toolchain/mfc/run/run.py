@@ -173,6 +173,10 @@ def run(targets=None, case=None):
         case.clean(targets)
         cons.unindent()
 
+    from .. import remap
+
+    remap.prepare_case_remap(case)
+
     qsystem = queues.get_system()
     cons.print(f"Using queue system [magenta]{qsystem.name}[/magenta].")
 

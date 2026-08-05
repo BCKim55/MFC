@@ -1392,13 +1392,65 @@ class CaseValidator:
         """Checks constraints on restart parameters (pre-process)"""
         old_grid = self.get("old_grid", "F") == "T"
         old_ic = self.get("old_ic", "F") == "T"
+        restart_remap = self.get("restart_remap", "F") == "T"
         t_step_old = self.get("t_step_old")
         num_patches = self.get("num_patches", 0)
 
-        self.prohibit(not old_grid and old_ic, "old_ic can only be enabled with old_grid enabled")
+        self.prohibit(
+            not old_grid and old_ic and not restart_remap,
+            "old_ic can only be enabled with old_grid enabled unless restart_remap is enabled",
+        )
         self.prohibit(old_grid and t_step_old is None, "old_grid requires t_step_old to be set")
+        self.prohibit(restart_remap and not old_ic, "restart_remap requires old_ic = T")
+        self.prohibit(
+            restart_remap and self.get("parallel_io", "F") != "T",
+            "restart_remap requires parallel_io = T",
+        )
+        self.prohibit(
+            restart_remap and self.get("file_per_process", "F") == "T",
+            "restart_remap requires file_per_process = F",
+        )
+        self.prohibit(
+            restart_remap and self.get("down_sample", "F") == "T",
+            "restart_remap is incompatible with down_sample = T",
+        )
+        if restart_remap:
+            if self.get("cfl_adap_dt", "F") == "T":
+                self.prohibit(self.get("n_start") is None, "restart_remap with cfl_adap_dt = T requires n_start")
+            else:
+                self.prohibit(self.get("t_step_start") is None, "restart_remap without cfl_adap_dt = T requires t_step_start")
+            for key in [
+                "restart_remap_source_file",
+                "restart_remap_source_m",
+                "restart_remap_source_n",
+                "restart_remap_source_p",
+                "restart_remap_source_x_beg",
+                "restart_remap_source_x_end",
+            ]:
+                self.prohibit(self.get(key) is None, f"restart_remap requires {key}")
+            if self.get("restart_remap_source_n", 0) > 0:
+                self.prohibit(
+                    self.get("restart_remap_source_y_beg") is None,
+                    "restart_remap requires restart_remap_source_y_beg when restart_remap_source_n > 0",
+                )
+                self.prohibit(
+                    self.get("restart_remap_source_y_end") is None,
+                    "restart_remap requires restart_remap_source_y_end when restart_remap_source_n > 0",
+                )
+            if self.get("restart_remap_source_p", 0) > 0:
+                self.prohibit(
+                    self.get("restart_remap_source_z_beg") is None,
+                    "restart_remap requires restart_remap_source_z_beg when restart_remap_source_p > 0",
+                )
+                self.prohibit(
+                    self.get("restart_remap_source_z_end") is None,
+                    "restart_remap requires restart_remap_source_z_end when restart_remap_source_p > 0",
+                )
         self.prohibit(num_patches < 0, "num_patches must be non-negative")
-        self.prohibit(num_patches == 0 and t_step_old is None, "num_patches must be positive for the non-restart case")
+        self.prohibit(
+            num_patches == 0 and t_step_old is None and not old_ic,
+            "num_patches must be positive for the non-restart case",
+        )
         num_patches_max = get_fortran_constants().get("num_patches_max", 1000)
         self.prohibit(
             num_patches > num_patches_max,

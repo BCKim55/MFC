@@ -114,6 +114,17 @@ is equivalent to `"riemann_solver": 2`. Defined names appear in each parameter's
 | `old_ic`         | Logical        | Use initial conditions from previous simulation |
 | `t_step_old`     | Integer        | Time step to restart from                 |
 | `n_start_old`    | Integer        | Starting index from previous simulation   |
+| `restart_remap`  | Logical        | Remap a coarse restart field onto the current case grid before pre-processing |
+| `restart_remap_source_file` | String | Coarse restart field file to remap |
+| `restart_remap_source_m` | Integer | Number of source restart cells in the x-direction |
+| `restart_remap_source_n` | Integer | Number of source restart cells in the y-direction |
+| `restart_remap_source_p` | Integer | Number of source restart cells in the z-direction |
+| `restart_remap_source_x_beg` | Real | Beginning of the source restart x-domain |
+| `restart_remap_source_x_end` | Real | End of the source restart x-domain |
+| `restart_remap_source_y_beg` | Real | Beginning of the source restart y-domain |
+| `restart_remap_source_y_end` | Real | End of the source restart y-domain |
+| `restart_remap_source_z_beg` | Real | Beginning of the source restart z-domain |
+| `restart_remap_source_z_end` | Real | End of the source restart z-domain |
 
 - `run_time_info` generates a text file that includes run-time information including the CFL number(s) at each time-step.
 - `rdma_mpi` optimizes data transfers between GPUs using Remote Direct Memory Access (RDMA).

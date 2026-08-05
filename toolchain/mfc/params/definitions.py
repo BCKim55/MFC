@@ -766,6 +766,7 @@ def _load():
         "down_sample",
         "old_grid",
         "old_ic",
+        "restart_remap",
         "mixlayer_vel_profile",
         "mixlayer_perturb",
         "perturb_flow",
@@ -780,6 +781,22 @@ def _load():
         "nv_uvm_pref_gpu",
     ]:
         _r(n, LOG)
+    for n in [
+        "restart_remap_source_m",
+        "restart_remap_source_n",
+        "restart_remap_source_p",
+    ]:
+        _r(n, INT, {"grid"})
+    for n in [
+        "restart_remap_source_x_beg",
+        "restart_remap_source_x_end",
+        "restart_remap_source_y_beg",
+        "restart_remap_source_y_end",
+        "restart_remap_source_z_beg",
+        "restart_remap_source_z_end",
+    ]:
+        _r(n, REAL, {"grid"})
+    _r("restart_remap_source_file", STR, {"grid"}, str_len="path_len")
     _r("int_comp", INT)
     _r("case_dir", STR, str_len="path_len")
     _r("file_extension", STR, str_len="path_len")

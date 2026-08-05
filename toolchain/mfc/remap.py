@@ -75,6 +75,41 @@ def _read_grid(restart_dir, shape):
     return tuple(grid)
 
 
+def _uniform_grid_from_params(params, prefix):
+    shape = (
+        int(params[f"{prefix}_m"]) + 1,
+        int(params.get(f"{prefix}_n", 0)) + 1,
+        int(params.get(f"{prefix}_p", 0)) + 1,
+    )
+    x_cb = np.linspace(
+        float(params[f"{prefix}_x_beg"]),
+        float(params[f"{prefix}_x_end"]),
+        shape[0] + 1,
+        dtype=np.float64,
+    )
+    y_cb = (
+        np.linspace(
+            float(params[f"{prefix}_y_beg"]),
+            float(params[f"{prefix}_y_end"]),
+            shape[1] + 1,
+            dtype=np.float64,
+        )
+        if shape[1] > 1
+        else np.array([-0.5, 0.5], dtype=np.float64)
+    )
+    z_cb = (
+        np.linspace(
+            float(params[f"{prefix}_z_beg"]),
+            float(params[f"{prefix}_z_end"]),
+            shape[2] + 1,
+            dtype=np.float64,
+        )
+        if shape[2] > 1
+        else np.array([-0.5, 0.5], dtype=np.float64)
+    )
+    return shape, (x_cb, y_cb, z_cb)
+
+
 def _dtype_from_precision(params):
     precision = int(params.get("precision", 2))
     if precision == 1:
@@ -117,6 +152,14 @@ def _write_grid(restart_dir, grid):
         np.asarray(values, dtype=np.float64).tofile(restart_dir / f"{axis}_cb.dat")
 
 
+def _write_parallel_grid(restart_dir, grid):
+    create_directory(str(restart_dir))
+    for axis, values in zip(["x", "y", "z"], grid):
+        if axis != "x" and values.size == 2:
+            continue
+        np.asarray(values, dtype=np.float64).tofile(restart_dir / f"lustre_{axis}_cb.dat")
+
+
 def _interp_axis(values, old_coords, new_coords, axis):
     moved = np.moveaxis(values, axis, 0)
     out = np.empty((new_coords.size, *moved.shape[1:]), dtype=np.float64)
@@ -134,13 +177,51 @@ def remap_fields(fields, old_grid, new_grid):
     new_centers = [_cell_centers(axis) for axis in new_grid]
 
     out = fields
-    for axis, (old_axis, new_axis, old_bounds) in enumerate(zip(old_centers, new_centers, old_grid), start=1):
+    for axis, (old_axis, new_axis, old_bounds) in enumerate(
+        zip(old_centers, new_centers, old_grid),
+        start=1,
+    ):
         if old_axis.size == 1 and new_axis.size == 1:
             continue
         if new_axis[0] < old_bounds[0] or new_axis[-1] > old_bounds[-1]:
             raise MFCException("Target grid cell centers must lie inside the source grid extent.")
         out = _interp_axis(out, old_axis, new_axis, axis)
     return out
+
+
+def _target_restart_step(params):
+    if params.get("cfl_adap_dt", "F") == "T":
+        return int(params.get("n_start", params.get("t_step_old", 0)))
+    return int(params.get("t_step_start", params.get("t_step_old", 0)))
+
+
+def prepare_case_remap(case):
+    params = case.params
+    if params.get("restart_remap", "F") != "T":
+        return
+
+    if params.get("stretch_x", "F") == "T" or params.get("stretch_y", "F") == "T" or params.get("stretch_z", "F") == "T":
+        raise MFCException("restart_remap currently supports unstretched target grids only.")
+
+    source_file = Path(params["restart_remap_source_file"])
+    if not source_file.is_absolute():
+        source_file = Path(case.dirpath) / source_file
+
+    source_shape, source_grid = _uniform_grid_from_params(params, "restart_remap_source")
+    target_grid = _target_grid(params)
+    target_step = _target_restart_step(params)
+    output_dir = Path(case.dirpath) / "restart_data"
+    dtype = _dtype_from_precision(params)
+
+    fields = _read_restart(source_file, source_shape, dtype)
+    remapped = remap_fields(fields, source_grid, target_grid)
+
+    _write_parallel_grid(output_dir, target_grid)
+    _write_restart(output_dir / f"lustre_{target_step}.dat", remapped, dtype)
+
+    cons.print("[bold]Restart Remap[/bold]")
+    cons.print(f"  source: {source_file}")
+    cons.print(f"  output: {output_dir / f'lustre_{target_step}.dat'}")
 
 
 def remap():
