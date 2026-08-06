@@ -1397,10 +1397,11 @@ class CaseValidator:
         num_patches = self.get("num_patches", 0)
 
         self.prohibit(
-            not old_grid and old_ic and not restart_remap,
-            "old_ic can only be enabled with old_grid enabled unless restart_remap is enabled",
+            not old_grid and old_ic,
+            "old_ic can only be enabled with old_grid enabled",
         )
         self.prohibit(old_grid and t_step_old is None, "old_grid requires t_step_old to be set")
+        self.prohibit(restart_remap and not old_grid, "restart_remap requires old_grid = T")
         self.prohibit(restart_remap and not old_ic, "restart_remap requires old_ic = T")
         self.prohibit(
             restart_remap and self.get("parallel_io", "F") != "T",

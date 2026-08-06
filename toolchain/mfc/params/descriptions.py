@@ -153,7 +153,7 @@ DESCRIPTIONS = {
     "old_grid": "Use grid from previous simulation",
     "old_ic": "Use initial conditions from previous simulation",
     "t_step_old": "Time step to restart from",
-    "restart_remap": "Remap a coarse restart field onto the current case grid before pre-processing",
+    "restart_remap": "Remap a coarse restart field into restart_data before pre-processing",
     "restart_remap_source_file": "Coarse restart field file to remap",
     "restart_remap_source_m": "Number of source restart cells in the x-direction",
     "restart_remap_source_n": "Number of source restart cells in the y-direction",
