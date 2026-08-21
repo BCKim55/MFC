@@ -10,10 +10,8 @@
 !! using the lso_pp_a_* weights from the Python BCD design. Stat product fields are
 !! computed afterwards from the filtered state.
 !!
-!! IB-aware normalization: s_apply_lso_pp_filter_masked filters with a weight field w,
-!! q <- filter(w*q)/filter(w). For original (unfiltered) input w is the binary gas mask
-!! from ib_markers; for pre-filtered input w is the simulation-written stage-1 filtered
-!! mask (lso_mask_<t>.dat), which composes the two-stage normalized convolution exactly:
+!! IB-aware normalization: q <- filter(w*q)/filter(w) with w the binary gas mask (original input)
+!! or the simulation-written filtered mask lso_mask_<t>.dat (pre-filtered input), so that
 !! filter2(w*qhat1)/filter2(w) = filter2(filter1(m*q))/filter2(filter1(m)).
 module m_lso_pp_filter
 
@@ -30,7 +28,10 @@ module m_lso_pp_filter
 
     public :: s_initialize_lso_pp_filter_module, s_finalize_lso_pp_filter_module, s_apply_lso_pp_filter, &
         & s_compute_lso_pp_stat_fields, q_lso_pp_stat_vf, s_apply_lso_pp_filter_masked, s_lso_pp_mask_from_ib, &
-        & s_compute_lso_closure_fields, f_lso_n_closure
+        & s_compute_lso_closure_fields, f_lso_n_closure, q_lso_pp_w_vf
+
+    ! Floor on the normalized-convolution denominator filter(w).
+    real(wp), parameter :: lso_w_floor = 1.0e-3_wp
 
     ! Scratch buffer for one directional pass.
     real(wp), allocatable :: lso_pp_tmp(:,:,:)
@@ -38,10 +39,8 @@ module m_lso_pp_filter
     ! Filtered stat fields (lso_stat_wrt = T).
     type(scalar_field), allocatable :: q_lso_pp_stat_vf(:)
 
-    ! Post-filtered normalization weight w2 = filter2(w1) (interior only), kept for the
-    ! closure pass so T_tilde can be built at the widened target width. Defaults to 1
-    ! (no-mask runs keep F[E] = E*1).
-    type(scalar_field), public :: q_lso_pp_w_vf(1:1)
+    ! Post-filtered normalization weight w2 = filter2(w1) (interior only), used by the closure pass; 1 without a mask.
+    type(scalar_field) :: q_lso_pp_w_vf(1:1)
 
 contains
 
@@ -213,14 +212,14 @@ contains
 
     end subroutine s_lso_pp_mask_from_ib
 
-    !> Mask-normalized filtering: q <- filter(w*q) / filter(w), applied in place. The solid interior takes the normalized fluid
-    !! average (finite primitives everywhere); the floor only guards cells with almost no fluid within the filter reach.
+    !> Mask-normalized filtering: q <- filter(w*q)/filter(w), applied in place (the solid interior takes the fluid average).
     impure subroutine s_apply_lso_pp_filter_masked(q_cons_vf, w_vf)
 
         type(scalar_field), intent(inout) :: q_cons_vf(:), w_vf(1:1)
-        integer                           :: i, j, k, l
+        integer                           :: i, j, k, l, nv
 
-        do i = 1, sys_size
+        nv = size(q_cons_vf)
+        do i = 1, nv
             do l = 0, p
                 do k = 0, n
                     do j = 0, m
@@ -230,10 +229,9 @@ contains
             end do
         end do
 
-        call s_apply_lso_pp_filter(q_cons_vf)  ! numerator   filter(w*q)
-        call s_apply_lso_pp_filter(w_vf)  ! denominator filter(w)
+        call s_apply_lso_pp_filter(q_cons_vf)
+        call s_apply_lso_pp_filter(w_vf)
 
-        ! Keep w2 = filter2(w1) for the closure pass (F[E] = E_pp * w2 at target width).
         do l = 0, p
             do k = 0, n
                 do j = 0, m
@@ -242,12 +240,12 @@ contains
             end do
         end do
 
-        do i = 1, sys_size
+        do i = 1, nv
             do l = 0, p
                 do k = 0, n
                     do j = 0, m
                         q_cons_vf(i)%sf(j, k, l) = real(real(q_cons_vf(i)%sf(j, k, l), wp)/max(real(w_vf(1)%sf(j, k, l), wp), &
-                                  & 1.0e-3_wp), stp)
+                                  & lso_w_floor), stp)
                     end do
                 end do
             end do
@@ -266,12 +264,12 @@ contains
 
     end function f_lso_n_closure
 
-    !> Euler-Lagrange closure fields from the LSO stat products (phase-weighted filters F[.]; rho_b = F[rho]; u_favre = F[rho
-    !! u]/rho_b; T_tilde from F[rho T] = (F[E] - 1/2 F[rho|u|^2])/Cv with F[E] = E_lso*w): R_sg,ij = F[rho u_i u_j] - F[rho u_i]
-    !! F[rho u_j]/rho_b Q_T,i = gamma*Cv*(F[rho u_i T] - T_tilde F[rho u_i]) E_ku,i = (F[rho u_i |u|^2] - F[rho u_i]/rho_b F[rho
-    !! |u|^2])/2 W_tau_u,i = (F[rho (tau.u)_i] - (tau_b . F[rho u])_i)/rho_b R_mu_sg = tau_b - mu_g[grad(u~)+grad(u~)^T -
-    !! (2/3)div(u~) I] R_lam_sg = q_b - (-lambda_g grad(T_tilde)) [stored q uses q = -lambda grad T] Gradients: centred differences
-    !! on the (quasi-uniform) output grid with ghost-refreshed Favre fields. Output layout matches f_lso_n_closure().
+    !> Euler-Lagrange closure fields from the LSO stat products, with F[.] the phase-weighted filter, rho_b = F[rho], u~ = F[rho
+    !! u]/rho_b and T~ from F[rho T] = (F[E] - F[rho|u|^2]/2)/Cv, F[E] = E_lso*w: R_sg,ij = F[rho u_i u_j] - F[rho u_i] F[rho
+    !! u_j]/rho_b Q_T,i = gamma Cv (F[rho u_i T] - T~ F[rho u_i]) E_ku,i = (F[rho u_i |u|^2] - F[rho u_i] F[rho |u|^2]/rho_b)/2
+    !! W_tau_u,i = (F[rho (tau.u)_i] - (tau_b . F[rho u])_i)/rho_b R_mu_sg = tau_b - mu [grad(u~) + grad(u~)^T - (2/3) div(u~) I]
+    !! R_lam_sg = q_b + lambda grad(T~) Gradients are centred differences on the output grid with ghost-refreshed Favre fields;
+    !! layout per f_lso_n_closure().
     impure subroutine s_compute_lso_closure_fields(q_stat_vf, q_cons_vf, w_vf, q_cls_vf)
 
         type(scalar_field), intent(in)    :: q_stat_vf(:), q_cons_vf(:), w_vf(1:1)
@@ -404,8 +402,8 @@ contains
 
     end subroutine s_compute_lso_closure_fields
 
-    !> Refresh ghosts for direction mpi_dir (1=x, 2=y, 3=z). MPI ghosts come via s_mpi_sendrecv_variables_buffers; BC_GHOST_EXTRAP
-    !! faces are re-extrapolated from the current edge cell.
+    !> Refresh ghosts for direction mpi_dir (1=x, 2=y, 3=z): MPI faces via s_mpi_sendrecv_variables_buffers, BC_GHOST_EXTRAP faces
+    !! re-extrapolated from the edge cell, BC_PERIODIC faces wrapped locally.
     impure subroutine s_lso_pp_filter_ghost_refresh(q_cons_vf, mpi_dir)
 
         type(scalar_field), intent(inout) :: q_cons_vf(:)
@@ -433,74 +431,62 @@ contains
 
         select case (mpi_dir)
         case (1)
-            if (beg_bc == BC_GHOST_EXTRAP) then
-                do i = 1, nv
-                    do l = 0, p
-                        do k = 0, n
-                            do j = 1, buff_size
+            do i = 1, nv
+                do l = 0, p
+                    do k = 0, n
+                        do j = 1, buff_size
+                            if (beg_bc == BC_GHOST_EXTRAP) then
                                 q_cons_vf(i)%sf(-j, k, l) = q_cons_vf(i)%sf(0, k, l)
-                            end do
-                        end do
-                    end do
-                end do
-            end if
-            if (end_bc == BC_GHOST_EXTRAP) then
-                do i = 1, nv
-                    do l = 0, p
-                        do k = 0, n
-                            do j = 1, buff_size
+                            else if (beg_bc == BC_PERIODIC) then
+                                q_cons_vf(i)%sf(-j, k, l) = q_cons_vf(i)%sf(m - j + 1, k, l)
+                            end if
+                            if (end_bc == BC_GHOST_EXTRAP) then
                                 q_cons_vf(i)%sf(m + j, k, l) = q_cons_vf(i)%sf(m, k, l)
-                            end do
+                            else if (end_bc == BC_PERIODIC) then
+                                q_cons_vf(i)%sf(m + j, k, l) = q_cons_vf(i)%sf(j - 1, k, l)
+                            end if
                         end do
                     end do
                 end do
-            end if
+            end do
         case (2)
-            if (beg_bc == BC_GHOST_EXTRAP) then
-                do i = 1, nv
-                    do l = 0, p
-                        do k = 1, buff_size
-                            do j = 0, m
+            do i = 1, nv
+                do l = 0, p
+                    do k = 1, buff_size
+                        do j = 0, m
+                            if (beg_bc == BC_GHOST_EXTRAP) then
                                 q_cons_vf(i)%sf(j, -k, l) = q_cons_vf(i)%sf(j, 0, l)
-                            end do
-                        end do
-                    end do
-                end do
-            end if
-            if (end_bc == BC_GHOST_EXTRAP) then
-                do i = 1, nv
-                    do l = 0, p
-                        do k = 1, buff_size
-                            do j = 0, m
+                            else if (beg_bc == BC_PERIODIC) then
+                                q_cons_vf(i)%sf(j, -k, l) = q_cons_vf(i)%sf(j, n - k + 1, l)
+                            end if
+                            if (end_bc == BC_GHOST_EXTRAP) then
                                 q_cons_vf(i)%sf(j, n + k, l) = q_cons_vf(i)%sf(j, n, l)
-                            end do
+                            else if (end_bc == BC_PERIODIC) then
+                                q_cons_vf(i)%sf(j, n + k, l) = q_cons_vf(i)%sf(j, k - 1, l)
+                            end if
                         end do
                     end do
                 end do
-            end if
+            end do
         case (3)
-            if (beg_bc == BC_GHOST_EXTRAP) then
-                do i = 1, nv
-                    do l = 1, buff_size
-                        do k = 0, n
-                            do j = 0, m
+            do i = 1, nv
+                do l = 1, buff_size
+                    do k = 0, n
+                        do j = 0, m
+                            if (beg_bc == BC_GHOST_EXTRAP) then
                                 q_cons_vf(i)%sf(j, k, -l) = q_cons_vf(i)%sf(j, k, 0)
-                            end do
-                        end do
-                    end do
-                end do
-            end if
-            if (end_bc == BC_GHOST_EXTRAP) then
-                do i = 1, nv
-                    do l = 1, buff_size
-                        do k = 0, n
-                            do j = 0, m
+                            else if (beg_bc == BC_PERIODIC) then
+                                q_cons_vf(i)%sf(j, k, -l) = q_cons_vf(i)%sf(j, k, p - l + 1)
+                            end if
+                            if (end_bc == BC_GHOST_EXTRAP) then
                                 q_cons_vf(i)%sf(j, k, p + l) = q_cons_vf(i)%sf(j, k, p)
-                            end do
+                            else if (end_bc == BC_PERIODIC) then
+                                q_cons_vf(i)%sf(j, k, p + l) = q_cons_vf(i)%sf(j, k, l - 1)
+                            end if
                         end do
                     end do
                 end do
-            end if
+            end do
         end select
 
     end subroutine s_lso_pp_filter_ghost_refresh

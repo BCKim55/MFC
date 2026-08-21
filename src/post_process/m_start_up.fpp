@@ -279,10 +279,7 @@ contains
 
     end subroutine s_reload_data
 
-    !> Reconvert conservative variables to primitive after the post_process LSO filter has modified q_cons_vf in place.
-    !! s_apply_lso_pp_filter only touches q_cons_vf, so q_prim_vf (used for velocity, pressure, and other primitive-derived output
-    !! in s_save_data) must be refreshed; otherwise stale, unfiltered primitive data is written. Mirrors the buffer-population +
-    !! conversion sequence in s_reload_data (grid buffers are unchanged).
+    !> Reconvert q_cons_vf to q_prim_vf after the post_process LSO filter modified it in place (same sequence as s_reload_data).
     impure subroutine s_reconvert_filtered_to_primitive()
 
         if (chemistry) call s_compute_q_T_sf(q_T_sf, q_cons_vf, idwbuff)
@@ -948,6 +945,20 @@ contains
 
     !> Read the simulation-written stage-1 filtered gas-mask (lso_mask_<t>.dat) into the INTERIOR of w_vf (caller allocates
     !! w_vf(1)%sf with ghost bounds). found is made collectively consistent so all ranks agree on whether to take the masked path.
+    impure subroutine s_lso_sync_found(found)
+
+        logical, intent(inout) :: found
+
+#ifdef MFC_MPI
+        integer :: found_int, found_min, ierr
+
+        found_int = merge(1, 0, found)
+        call MPI_ALLREDUCE(found_int, found_min, 1, MPI_INTEGER, MPI_MIN, MPI_COMM_WORLD, ierr)
+        found = (found_min == 1)
+#endif
+
+    end subroutine s_lso_sync_found
+
     impure subroutine s_read_lso_mask(w_vf, t_step, found)
 
         type(scalar_field), intent(inout) :: w_vf(1:1)
@@ -959,14 +970,7 @@ contains
         allocate (w_io(1)%sf(0:m,0:n,0:p))
         call s_read_lso_stat_file(w_io, 1, t_step, found, 'lso_mask_')
 
-#ifdef MFC_MPI
-        block
-            integer :: found_int, found_min, ierr
-            found_int = merge(1, 0, found)
-            call MPI_ALLREDUCE(found_int, found_min, 1, MPI_INTEGER, MPI_MIN, MPI_COMM_WORLD, ierr)
-            found = (found_min == 1)
-        end block
-#endif
+        call s_lso_sync_found(found)
 
         if (found) then
             do l = 0, p
@@ -999,15 +1003,7 @@ contains
 
         call s_read_lso_stat_file(q_stat_vf, n_lso_stat, t_step, found)
 
-        ! Make `found` agree on every rank (the Silo write path is collective).
-#ifdef MFC_MPI
-        block
-            integer :: found_int, found_min, ierr
-            found_int = merge(1, 0, found)
-            call MPI_ALLREDUCE(found_int, found_min, 1, MPI_INTEGER, MPI_MIN, MPI_COMM_WORLD, ierr)
-            found = (found_min == 1)
-        end block
-#endif
+        call s_lso_sync_found(found)
 
         if (found) call s_write_lso_stat_fields(q_stat_vf, t_step)
 
@@ -1035,19 +1031,12 @@ contains
             allocate (q_stat_vf(i)%sf(0:m,0:n,0:p))
         end do
         call s_read_lso_stat_file(q_stat_vf, n_lso_stat, t_step, found)
-#ifdef MFC_MPI
-        block
-            integer :: found_int, found_min, ierr
-            found_int = merge(1, 0, found)
-            call MPI_ALLREDUCE(found_int, found_min, 1, MPI_INTEGER, MPI_MIN, MPI_COMM_WORLD, ierr)
-            found = (found_min == 1)
-        end block
-#endif
+        call s_lso_sync_found(found)
 
         if (found) then
             allocate (w_vf(1)%sf(0:m,0:n,0:p))
             call s_read_lso_mask(w_vf, t_step, found_w)
-            if (.not. found_w) w_vf(1)%sf = 1._stp  ! no-IB runs write no mask; w = 1
+            if (.not. found_w) w_vf(1)%sf = 1._stp
 
             n_cls = f_lso_n_closure()
             allocate (q_cls_vf(1:n_cls))
@@ -1072,8 +1061,7 @@ contains
 
     end subroutine s_save_lso_closure_data
 
-    !> Closure fields for the POST-WIDENED data (lso_pp_filter = T): read the sigma1-width stat binary, apply the sigma2 pass to
-    !! every stat product (the filter is linear, so this yields the target-width filtered products exactly), then compute the
+    !> Closure fields for the post-widened data (lso_pp_filter = T): apply the sigma2 pass to every stat product, then compute the
     !! closures against the post-filtered conserved state and weight w2 = filter2(w1).
     impure subroutine s_save_lso_pp_closure_data(t_step)
 
@@ -1092,14 +1080,7 @@ contains
                       & 2):ubound(q_cons_vf(1)%sf, 2),lbound(q_cons_vf(1)%sf, 3):ubound(q_cons_vf(1)%sf, 3)))
         end do
         call s_read_lso_stat_file(q_io_vf, n_lso_stat, t_step, found)
-#ifdef MFC_MPI
-        block
-            integer :: found_int, found_min, ierr
-            found_int = merge(1, 0, found)
-            call MPI_ALLREDUCE(found_int, found_min, 1, MPI_INTEGER, MPI_MIN, MPI_COMM_WORLD, ierr)
-            found = (found_min == 1)
-        end block
-#endif
+        call s_lso_sync_found(found)
 
         if (found) then
             do i = 1, n_lso_stat
@@ -1164,51 +1145,43 @@ contains
 
         idx = 0
         do c = 1, nt
-            idx = idx + 1
-            varname = 'R_sg_' // tc(c)
-            call s_put_lso_var(q_cls_vf(idx))
-            call s_write_variable_to_formatted_database_file(varname, t_step)
+            call put_next('R_sg_' // tc(c))
         end do
         do a = 1, nd
-            idx = idx + 1
-            varname = 'Q_T_' // dc(a)
-            call s_put_lso_var(q_cls_vf(idx))
-            call s_write_variable_to_formatted_database_file(varname, t_step)
+            call put_next('Q_T_' // dc(a))
         end do
         do a = 1, nd
-            idx = idx + 1
-            varname = 'E_ku_' // dc(a)
-            call s_put_lso_var(q_cls_vf(idx))
-            call s_write_variable_to_formatted_database_file(varname, t_step)
+            call put_next('E_ku_' // dc(a))
         end do
         do a = 1, nd
-            idx = idx + 1
-            varname = 'W_tau_u_' // dc(a)
-            call s_put_lso_var(q_cls_vf(idx))
-            call s_write_variable_to_formatted_database_file(varname, t_step)
+            call put_next('W_tau_u_' // dc(a))
         end do
         do c = 1, nt
-            idx = idx + 1
-            varname = 'R_mu_sg_' // tc(c)
-            call s_put_lso_var(q_cls_vf(idx))
-            call s_write_variable_to_formatted_database_file(varname, t_step)
+            call put_next('R_mu_sg_' // tc(c))
         end do
         do a = 1, nd
-            idx = idx + 1
-            varname = 'R_lam_sg_' // dc(a)
-            call s_put_lso_var(q_cls_vf(idx))
-            call s_write_variable_to_formatted_database_file(varname, t_step)
+            call put_next('R_lam_sg_' // dc(a))
         end do
-        idx = idx + 1
-        varname = 'T_tilde'
-        call s_put_lso_var(q_cls_vf(idx))
-        call s_write_variable_to_formatted_database_file(varname, t_step)
+        call put_next('T_tilde')
         do a = 1, nd
+            call put_next('u_favre_' // dc(a))
+        end do
+
+        call s_close_formatted_database_file()
+        call s_switch_output_dirs(.true.)
+
+    contains
+
+        impure subroutine put_next(name)
+
+            character(LEN=*), intent(in) :: name
+
             idx = idx + 1
-            varname = 'u_favre_' // dc(a)
+            varname = name
             call s_put_lso_var(q_cls_vf(idx))
             call s_write_variable_to_formatted_database_file(varname, t_step)
-        end do
+
+        end subroutine put_next
 
     end subroutine s_write_lso_closure_fields
 
@@ -1225,12 +1198,7 @@ contains
 
     end subroutine s_save_lso_pp_stat_data
 
-    !> Write the LSO statistical product fields in q_stat_vf to the silo_hdf5_lso_stat/ database. Shared by s_save_lso_stat_data
-    !! (fields read from the simulation-written binary file) and s_save_lso_pp_stat_data (fields computed in-process from the
-    !! post_process-filtered state). Switches to the lso_stat output directory, writes the grid and all variables, then restores the
-    !! LSO directory for subsequent passes.
-    !> Copy a ghost-less LSO field into q_sf, replicating edge cells into the Silo offset (pad) region so multi-rank tiles carry no
-    !! zero seams.
+    !> Copy a ghost-less LSO field into q_sf, replicating edge cells into the Silo pad region.
     impure subroutine s_put_lso_var(fld)
 
         type(scalar_field), intent(in) :: fld
@@ -1246,11 +1214,21 @@ contains
 
     end subroutine s_put_lso_var
 
+    !> Write the LSO statistical product fields in q_stat_vf to silo_hdf5_lso_stat/ and restore the LSO output directory.
     impure subroutine s_write_lso_stat_fields(q_stat_vf, t_step)
 
         type(scalar_field), intent(in) :: q_stat_vf(:)
         integer, intent(in)            :: t_step
         character(LEN=name_len)        :: varname
+        character(LEN=2)               :: tc(6)
+        integer                        :: c, nt
+
+        nt = num_dims*(num_dims + 1)/2
+        if (num_dims == 3) then
+            tc(1:6) = (/'11', '12', '13', '22', '23', '33'/)
+        else
+            tc(1:3) = (/'11', '12', '22'/)
+        end if
 
         call s_switch_to_lso_stat_dir()
         call s_open_formatted_database_file(t_step)
@@ -1302,28 +1280,11 @@ contains
         end if
 
         ! rho*u*u upper triangle
-        varname = 'rho_uu_11'
-        call s_put_lso_var(q_stat_vf(lso_stat_rhouu_beg))
-        call s_write_variable_to_formatted_database_file(varname, t_step)
-        if (num_dims >= 2) then
-            varname = 'rho_uu_12'
-            call s_put_lso_var(q_stat_vf(lso_stat_rhouu_beg + 1))
+        do c = 1, nt
+            varname = 'rho_uu_' // tc(c)
+            call s_put_lso_var(q_stat_vf(lso_stat_rhouu_beg + c - 1))
             call s_write_variable_to_formatted_database_file(varname, t_step)
-            varname = 'rho_uu_22'
-            call s_put_lso_var(q_stat_vf(lso_stat_rhouu_beg + 2))
-            call s_write_variable_to_formatted_database_file(varname, t_step)
-        end if
-        if (num_dims == 3) then
-            varname = 'rho_uu_13'
-            call s_put_lso_var(q_stat_vf(lso_stat_rhouu_beg + 3))
-            call s_write_variable_to_formatted_database_file(varname, t_step)
-            varname = 'rho_uu_23'
-            call s_put_lso_var(q_stat_vf(lso_stat_rhouu_beg + 4))
-            call s_write_variable_to_formatted_database_file(varname, t_step)
-            varname = 'rho_uu_33'
-            call s_put_lso_var(q_stat_vf(lso_stat_rhouu_beg + 5))
-            call s_write_variable_to_formatted_database_file(varname, t_step)
-        end if
+        end do
 
         ! rho*u*|u|^2
         varname = 'rho_uke_x'
@@ -1356,28 +1317,11 @@ contains
         end if
 
         ! tau (same layout as rho_uu)
-        varname = 'tau_11'
-        call s_put_lso_var(q_stat_vf(lso_stat_tau_beg))
-        call s_write_variable_to_formatted_database_file(varname, t_step)
-        if (num_dims >= 2) then
-            varname = 'tau_12'
-            call s_put_lso_var(q_stat_vf(lso_stat_tau_beg + 1))
+        do c = 1, nt
+            varname = 'tau_' // tc(c)
+            call s_put_lso_var(q_stat_vf(lso_stat_tau_beg + c - 1))
             call s_write_variable_to_formatted_database_file(varname, t_step)
-            varname = 'tau_22'
-            call s_put_lso_var(q_stat_vf(lso_stat_tau_beg + 2))
-            call s_write_variable_to_formatted_database_file(varname, t_step)
-        end if
-        if (num_dims == 3) then
-            varname = 'tau_13'
-            call s_put_lso_var(q_stat_vf(lso_stat_tau_beg + 3))
-            call s_write_variable_to_formatted_database_file(varname, t_step)
-            varname = 'tau_23'
-            call s_put_lso_var(q_stat_vf(lso_stat_tau_beg + 4))
-            call s_write_variable_to_formatted_database_file(varname, t_step)
-            varname = 'tau_33'
-            call s_put_lso_var(q_stat_vf(lso_stat_tau_beg + 5))
-            call s_write_variable_to_formatted_database_file(varname, t_step)
-        end if
+        end do
 
         ! q_i
         varname = 'q_x'
