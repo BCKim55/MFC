@@ -158,9 +158,7 @@ contains
         end if
 
         if (format == 1) then
-            ! Route to the _lso directory whenever the written fields are filtered:
-            ! either read pre-filtered (lso_filter_wrt) or filtered here (lso_pp_filter
-            ! on the original data). Keeps the plain silo_hdf5/ output unfiltered.
+            ! Filtered fields (read pre-filtered, or filtered here) go to silo_hdf5_lso/.
             if (lso_filter_wrt .or. lso_pp_filter) then
                 dbdir = trim(case_dir) // '/silo_hdf5_lso'
             else

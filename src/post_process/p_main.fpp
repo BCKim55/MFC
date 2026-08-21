@@ -47,17 +47,10 @@ program p_main
         ! Primary pass: read (LSO-filtered when lso_filter_wrt=T) and write.
         call s_perform_time_step(t_step)
 
-        ! Post-process FIR filter: apply an additional Gaussian filter to the conserved variables in place,
-        ! then reconvert to primitive so s_save_data emits the filtered cons AND prim fields (s_apply_lso_pp_filter
-        ! only touches q_cons_vf). When lso_stat_wrt=T, compute the stat product fields now, while q_cons_vf still
-        ! holds the filtered state (the secondary pass below reloads unfiltered data). Works on either input:
-        ! pre-filtered coarse data (lso_filter_wrt=T; toolchain sizes the pass for sqrt(target^2 - in^2)) or the
-        ! original full-resolution data (lso_filter_wrt=F; full target width). Output goes to silo_hdf5_lso/
-        ! in both cases (s_save_data routes on lso_filter_wrt .or. lso_pp_filter).
+        ! Post-process filter: filter q_cons_vf in place (pre-filtered coarse data or original data), reconvert
+        ! to primitive, and compute the stat products while q_cons_vf still holds the filtered state.
         if (lso_pp_filter) then
-            ! IB-aware normalization weight: the stage-1 filtered mask for pre-filtered
-            ! input (exact two-stage composition), the binary ib_markers gas mask for
-            ! original input, or none (plain filter) when neither is available.
+            ! Normalization weight: the simulation-written filtered mask, the ib_markers gas mask, or none.
             block
                 type(scalar_field) :: w_vf(1:1)
                 logical            :: have_w
@@ -67,9 +60,7 @@ program p_main
                 if (lso_filter_wrt) then
                     call s_read_lso_mask(w_vf, t_step, have_w)
                     if (.not. have_w .and. ib .and. proc_rank == 0) then
-                        print '(A)', &
-                            & ' WARNING: lso_mask file not found; post_process filter runs ' &
-                            & // 'without IB normalization (solid neighborhood will smear).'
+                        print '(A)', 'Warning: lso_mask file not found; post_process filter runs without IB normalization.'
                     end if
                 else if (ib) then
                     call s_lso_pp_mask_from_ib(w_vf)
@@ -102,10 +93,8 @@ program p_main
             lso_filter_wrt = .true.
         end if
 
-        ! Third pass: write LSO statistical product fields to silo_hdf5_lso_stat/. In post_process filter mode the
-        ! fields were computed in-process above (from the filtered state); otherwise they are read from the
-        ! simulation-written lso_stat binary. Done here (after the secondary pass) so the lso_stat directory switch
-        ! does not disturb the primary/secondary Silo writes.
+        ! Third pass: LSO statistical product fields to silo_hdf5_lso_stat/ (computed above in post_process
+        ! filter mode, otherwise read from the simulation-written lso_stat binary).
         if (lso_stat_wrt) then
             if (lso_pp_filter) then
                 call s_save_lso_pp_stat_data(t_step)
@@ -114,23 +103,17 @@ program p_main
             end if
         end if
 
-        ! Fourth pass: Euler-Lagrange closure fields to silo_hdf5_lso_closure/. Uses the
-        ! simulation-written stat binary + the read filtered conserved state + the mask,
-        ! so it requires the plain lso_filter_wrt path (no post filtering of the input).
+        ! Fourth pass: Euler-Lagrange closure fields to silo_hdf5_lso_closure/, at the in-situ width or
+        ! (lso_pp_filter with downsampled input) at the widened width.
         if (lso_closure_wrt) then
             if (lso_filter_wrt .and. lso_stat_wrt .and. .not. lso_pp_filter) then
-                ! In-situ width: closures straight from the stat binary.
                 call s_save_lso_closure_data(t_step)
             else if (lso_filter_wrt .and. lso_stat_wrt .and. lso_pp_filter .and. lso_down_sample_factor > 1) then
-                ! Post-widened width: sigma2-filter the stat products first (linear, so
-                ! this is the exact target-width filter of the fine-grid products).
-                ! factor <= 1 is excluded: the secondary pass above reloaded unfiltered
-                ! data into q_cons_vf, which would mix widths in the closure inputs.
                 call s_save_lso_pp_closure_data(t_step)
             else if (proc_rank == 0 .and. t_step == t_step_start) then
                 print '(A)', &
-                    & ' WARNING: lso_closure_wrt requires lso_filter_wrt=T and ' &
-                    & // 'lso_stat_wrt=T (with lso_pp_filter=T also lso_down_sample_factor>1); ' // 'closure output skipped.'
+                    & 'Warning: lso_closure_wrt requires lso_filter_wrt=T and lso_stat_wrt=T ' &
+                    & // '(with lso_pp_filter=T also lso_down_sample_factor>1); closure output skipped.'
             end if
         end if
 

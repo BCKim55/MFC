@@ -666,16 +666,16 @@ To restart the simulation from $k$-th time step, see @ref running "Restarting Ca
 | `lso_a_x`               | Real    | Per-pass 9-point stencil coefficients in x (5 × lso_max_passes, auto-computed) |
 | `lso_a_y`               | Real    | Per-pass 9-point stencil coefficients in y (5 × lso_max_passes, auto-computed) |
 | `lso_a_z`               | Real    | Per-pass 9-point stencil coefficients in z (5 × lso_max_passes, auto-computed) |
-| `lso2_n_passes_x`       | Integer | Stage-2 (coarse grid) passes in x for the two-stage in-situ pyramid (auto-computed when `filter_sigma` exceeds ~8 cells and output is downsampled) |
+| `lso2_n_passes_x`       | Integer | Stage-2 (coarse grid) passes in x for the two-stage in-situ pyramid (auto-computed when `lso_filter_wrt=T`, `lso_down_sample_factor>1` and `filter_sigma` exceeds 1.05 × σ₁, with σ₁ = max(8, 1.6 × factor) cells; requires `parallel_io=T`) |
 | `lso2_n_passes_y`       | Integer | Stage-2 passes in y (auto-computed) |
 | `lso2_n_passes_z`       | Integer | Stage-2 passes in z (auto-computed) |
 | `lso2_a_x`              | Real    | Stage-2 per-pass stencil coefficients in x (auto-computed) |
 | `lso2_a_y`              | Real    | Stage-2 per-pass stencil coefficients in y (auto-computed) |
 | `lso2_a_z`              | Real    | Stage-2 per-pass stencil coefficients in z (auto-computed) |
 | `lso_closure_wrt`       | Logical | post_process: compute Euler–Lagrange closure fields (subgrid stress R_sg, temperature flux Q_T, kinetic-energy flux E_ku, viscous power W_tau_u, subgrid viscous stress R_mu_sg, subgrid heat flux R_lam_sg, plus T_tilde and Favre velocity) from the LSO stat data and write them to silo_hdf5_lso_closure/. Requires `lso_filter_wrt=T` and `lso_stat_wrt=T`; with `lso_pp_filter=T` the stat products are sigma2-filtered first so the closures come out at the widened target width (needs `lso_down_sample_factor>1`) |
-| `lso_pp_filter`         | Logical | Apply an additional LSO filter pass in post_process before writing output. Requires lso_filter_wrt=True. |
-| `lso_filter_sigma_in`   | Real    | Gaussian sigma (physical units) already applied to the input data. Defaults to the in-situ width (`filter_sigma`, or d_p/2) when reading filtered data (`lso_filter_wrt=T`), and to 0 when reading original data (`lso_filter_wrt=F`). The toolchain sizes the post_process pass for sqrt(target² − in²) |
-| `lso_filter_sigma_target`| Real   | Target Gaussian sigma (physical units) for the post_process filter; must be &gt; `lso_filter_sigma_in` |
+| `lso_pp_filter`         | Logical | Apply an additional LSO filter pass in post_process before writing output, to the in-situ filtered data (`lso_filter_wrt=T`, coarse grid) or to the original data (`lso_filter_wrt=F`, fine grid) |
+| `lso_filter_sigma_in`   | Real    | Toolchain-only input (not forwarded to Fortran): Gaussian sigma (physical units) already applied to the input data. Defaults to the in-situ width (`filter_sigma`, or d_p/2) when reading filtered data (`lso_filter_wrt=T`), and to 0 when reading original data (`lso_filter_wrt=F`). The toolchain sizes the post_process pass for sqrt(target² − in²) |
+| `lso_filter_sigma_target`| Real   | Toolchain-only input: target Gaussian sigma (physical units) for the post_process filter; must be &gt; `lso_filter_sigma_in` |
 | `lso_pp_n_passes_x`     | Integer | Number of post-process filter passes in x |
 | `lso_pp_n_passes_y`     | Integer | Number of post-process filter passes in y |
 | `lso_pp_n_passes_z`     | Integer | Number of post-process filter passes in z |

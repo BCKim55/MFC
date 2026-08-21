@@ -23,9 +23,12 @@ module m_lso_filter
 
     private
 
-    public :: s_initialize_lso_filter_module, s_apply_lso_filter, s_copy_and_apply_lso_filter, s_lso_stride_sample, &
-        & s_finalize_lso_filter_module, q_filt_vf, q_filt_ds_vf, q_lso_stat_vf, q_lso_stat_ds_vf, s_compute_lso_stat_fields, &
-        & s_lso_stat_stride_sample, q_lso_mask_vf, q_lso_mask_ds_vf, s_lso_filter_stage2, s_apply_lso_filter_coarse
+    public :: s_initialize_lso_filter_module, s_copy_and_apply_lso_filter, s_lso_stride_sample, s_finalize_lso_filter_module, &
+        & q_filt_vf, q_filt_ds_vf, q_lso_stat_vf, q_lso_stat_ds_vf, s_lso_stat_stride_sample, q_lso_mask_vf, q_lso_mask_ds_vf, &
+        & s_lso_filter_stage2, s_apply_lso_filter_coarse
+
+    ! Floor on the normalized-convolution denominator filter(m).
+    real(wp), parameter :: lso_w_floor = 1.0e-3_wp
 
     ! Scratch buffer for one directional pass (interior only).
     real(wp), allocatable, dimension(:,:,:) :: lso_tmp
@@ -34,18 +37,13 @@ module m_lso_filter
     ! Filtered copy of the conserved variables (lso_filter_wrt = T).
     type(scalar_field), allocatable :: q_filt_vf(:)
 
-    ! Gas-mask field for IB-aware (normalized) filtering: 1 in fluid, 0 in solid.
-    ! Sized (1:1) so the same s_apply_lso_filter pipeline can filter it as the
-    ! denominator of the normalized convolution q_filt = filter(m*q)/filter(m).
+    ! Gas mask (1 in fluid, 0 in solid), the denominator of the normalized convolution filter(m*q)/filter(m).
     type(scalar_field), allocatable :: q_lso_mask_vf(:)
 
     ! Coarsened version (lso_down_sample_factor > 1).
     type(scalar_field), allocatable :: q_filt_ds_vf(:)
 
-    ! Coarse-grid (stage-2) machinery for the two-stage in-situ pyramid. The coarse
-    ! arrays carry lso_crs_gw ghost layers in each ACTIVE direction so the 9-point
-    ! stage-2 cascade can run on the decimated grid; stage 2 executes on the host
-    ! (the coarse grid is 1/factor^ndims of the fine cells, so cost is negligible).
+    ! Coarse-grid (stage-2) arrays carry lso_crs_gw ghost layers per active direction; stage 2 runs on the host.
     integer, parameter    :: lso_crs_gw = 4
     integer               :: crs_lo(3), crs_hi(3)
     real(wp), allocatable :: lso2_tmp(:,:,:)
@@ -53,17 +51,14 @@ module m_lso_filter
     real(wp), allocatable :: buff_crs_send(:), buff_crs_recv(:)
 #endif
 
-    ! Coarsened filtered gas-mask (the normalized-convolution weight w = filter(m)),
-    ! written alongside the filtered fields so post_process can compose an additional
-    ! filter exactly: filter2(w*qhat)/filter2(w).
+    ! Coarsened filtered gas mask w = filter(m), written so post_process can compose filter2(w*qhat)/filter2(w).
     type(scalar_field), allocatable :: q_lso_mask_ds_vf(:)
 
     ! Filtered statistical product fields (lso_stat_wrt = T).
     type(scalar_field), allocatable :: q_lso_stat_vf(:)
     type(scalar_field), allocatable :: q_lso_stat_ds_vf(:)
 
-    ! Dedicated CPU-side halo buffers for the stat exchange. n_lso_stat can exceed
-    ! sys_size, so the global buff_send/recv would overflow.
+    ! Host-side halo buffers for the stat exchange (n_lso_stat can exceed sys_size).
 #ifdef MFC_MPI
     real(wp), allocatable :: buff_stat_send(:), buff_stat_recv(:)
 #endif
@@ -243,10 +238,7 @@ contains
         call nvtxEndRange
 
         if (ib) then
-            ! IB-aware normalized convolution: q_filt = filter(m*q) / filter(m),
-            ! with the gas mask m = 1 in fluid, 0 in solid. This keeps the
-            ! (non-physical) solid-interior conserved state out of the fluid average,
-            ! so the filter does not smear the IB step into the surrounding fluid.
+            ! Normalized convolution q_filt = filter(m*q)/filter(m) with the gas mask m (1 in fluid, 0 in solid).
             call nvtxStartRange("LSO-FILTER-MASK")
             $:GPU_PARALLEL_LOOP(collapse=3, private='[j, k, l]')
             do l = 0, p
@@ -261,7 +253,6 @@ contains
                 end do
             end do
             $:END_GPU_PARALLEL_LOOP()
-            ! Pre-multiply the conserved copy by the mask (numerator m*q).
             do i = 1, sys_size
                 $:GPU_PARALLEL_LOOP(collapse=3, private='[j, k, l]')
                 do l = 0, p
@@ -276,17 +267,11 @@ contains
             end do
             call nvtxEndRange
 
-            call s_apply_lso_filter(q_filt_vf)  ! numerator   filter(m*q)
-            call s_apply_lso_filter(q_lso_mask_vf)  ! denominator filter(m)
+            call s_apply_lso_filter(q_filt_vf)
+            call s_apply_lso_filter(q_lso_mask_vf)
 
-            ! Normalize everywhere, solid interior included: the solid takes the
-            ! normalized fluid average, a smooth continuation that keeps the primitive
-            ! reconstruction finite (zeroing rho there gave u = mom/rho = 0/0). The
-            ! floor only guards the division where almost no fluid lies within the
-            ! filter reach (particle diameter >> filter width, not the target regime).
-            ! Two-stage pyramid (lso2 passes > 0): numerator and denominator stay
-            ! UNnormalized here; stage 2 filters both on the coarse grid and
-            ! normalizes there (s_lso_filter_stage2).
+            ! Normalize everywhere (the solid interior takes the fluid average). Under the two-stage
+            ! pyramid the numerator and denominator stay unnormalized until s_lso_filter_stage2.
             if (lso2_n_passes_x <= 0) then
                 do i = 1, sys_size
                     $:GPU_PARALLEL_LOOP(collapse=3, private='[j, k, l]')
@@ -294,7 +279,7 @@ contains
                         do k = 0, n
                             do j = 0, m
                                 q_filt_vf(i)%sf(j, k, l) = real(real(q_filt_vf(i)%sf(j, k, l), &
-                                          & wp)/max(real(q_lso_mask_vf(1)%sf(j, k, l), wp), 1.0e-3_wp), stp)
+                                          & wp)/max(real(q_lso_mask_vf(1)%sf(j, k, l), wp), lso_w_floor), stp)
                             end do
                         end do
                     end do
@@ -305,9 +290,7 @@ contains
             call s_apply_lso_filter(q_filt_vf)
         end if
 
-        ! Refresh q_filt_vf ghost cells so the down-sample interpolation can read
-        ! neighbour-rank / periodic data across boundaries instead of clamping locally
-        ! (clamping produced seams at every MPI rank boundary in the coarsened output).
+        ! Refresh ghost cells so the down-sample interpolation reads neighbour-rank / periodic data.
         if (lso_down_sample_factor > 1) then
             call s_lso_filter_ghost_refresh(q_filt_vf, 1)
             if (n > 0) call s_lso_filter_ghost_refresh(q_filt_vf, 2)
@@ -347,8 +330,6 @@ contains
                 end do
                 $:END_GPU_PARALLEL_LOOP()
             end if
-            ! Refresh stat-field ghost cells so the stat down-sample reads neighbour-rank /
-            ! periodic data across boundaries (same rationale as the q_filt refresh above).
             if (lso_down_sample_factor > 1) then
                 call s_lso_stat_ghost_refresh(1)
                 if (n > 0) call s_lso_stat_ghost_refresh(2)
@@ -378,13 +359,7 @@ contains
         integer                           :: i, ipass, j, k, l, nv
         real(wp)                          :: c0, c1, c2, c3, c4
 
-        ! nv = number of fields to filter (sys_size for the conserved copy, 1 for the
-        ! gas-mask denominator). Lets the same separable pipeline filter either.
-
         nv = size(q_cons_vf)
-
-        ! x-direction: pre-pass exchange so rank-boundary ghosts reflect the final
-        ! RK-updated interior rather than an intermediate sub-step.
 
         call nvtxStartRange("LSO-FILTER-X")
         call s_lso_filter_ghost_refresh(q_cons_vf, 1)
@@ -522,11 +497,8 @@ contains
         nv = size(q_src_vf)
         do i = 1, nv
             do l = 0, p_lso_ds
-                ! Global-coordinate mapping (start_idx is the rank's global cell offset; the
-                ! coarse offset is start_idx/factor, matching the MPI-IO subarray start). This
-                ! builds one consistent global coarse grid across ranks; j1 = j0 + 1 reads the
-                ! refreshed ghost cells across rank/periodic boundaries instead of clamping.
-                ! In serial (start_idx = 0, *_glb = local) this reduces to the previous mapping.
+                ! Global coarse index -> fine position; the coarse offset start_idx/factor matches the MPI-IO
+                ! subarray start, and j1 = j0 + 1 reads refreshed ghost cells across rank/periodic boundaries.
                 if (p_lso_ds > 0) then
                     gamma_pos = real(start_idx(3)/lso_down_sample_factor + l, wp)*real(p_glb, wp)/real(p_glb_lso_ds, &
                                      & wp) - real(start_idx(3), wp)
@@ -757,8 +729,7 @@ contains
 
     end subroutine s_lso_coarse_ghost_refresh
 
-    !> Stage-2 cascade of the two-stage in-situ pyramid: apply the lso2_a_* passes to the coarse-grid fields in place. Runs on the
-    !! host - the coarse grid holds 1/factor^ndims of the fine cells, so the cost is negligible next to stage 1.
+    !> Stage-2 cascade of the two-stage in-situ pyramid: apply the lso2_a_* passes to the coarse-grid fields in place (host).
     impure subroutine s_apply_lso_filter_coarse(q_vf)
 
         type(scalar_field), intent(inout) :: q_vf(:)
@@ -855,7 +826,7 @@ contains
     end subroutine s_apply_lso_filter_coarse
 
     !> Complete the two-stage in-situ pyramid on the downsampled arrays: stage-2 filter the decimated numerator (and mask
-    !! denominator when ib), then normalize so the written data is at the TARGET width. No-op unless lso2 passes are configured.
+    !! denominator when ib), then normalize. No-op unless lso2 passes are configured.
     impure subroutine s_lso_filter_stage2()
 
         integer :: i, j, k, l
@@ -870,7 +841,7 @@ contains
                     do k = 0, n_lso_ds
                         do j = 0, m_lso_ds
                             q_filt_ds_vf(i)%sf(j, k, l) = real(real(q_filt_ds_vf(i)%sf(j, k, l), &
-                                         & wp)/max(real(q_lso_mask_ds_vf(1)%sf(j, k, l), wp), 1.0e-3_wp), stp)
+                                         & wp)/max(real(q_lso_mask_ds_vf(1)%sf(j, k, l), wp), lso_w_floor), stp)
                         end do
                     end do
                 end do
@@ -891,13 +862,8 @@ contains
         logical                           :: fixup
 
         nv = size(q_cons_vf)
-        ! The IBM edge fixup below overwrites solid-flagged MPI ghost cells with the
-        ! interior edge cell. That is only valid for the RAW conserved state ahead of
-        ! the stat-field gradient stencils (keeps particle velocity out of the fluid
-        ! stencil). It must stay OFF during the filter cascade: there the ghosts carry
-        ! smoothed masked-numerator / mask-denominator fields, and overwriting them
-        ! breaks the linear cascade at rank boundaries that cut through a particle
-        ! (mid-cascade corruption is then amplified by later high-gain passes).
+        ! The IBM edge fixup (solid-flagged MPI ghosts <- interior edge cell) applies to the raw conserved
+        ! state ahead of the stat gradient stencils only; it must stay off during the filter cascade.
         fixup = .false.
         if (present(ib_edge_fixup)) fixup = ib_edge_fixup
 
@@ -1699,10 +1665,8 @@ contains
         end select
 
 #ifdef MFC_MPI
-        ! Manual halo exchange against buff_stat_*. We do not reuse
-        ! s_mpi_sendrecv_variables_buffers because (a) its buffers are sized for
-        ! sys_size, and (b) it packs from device memory. Tag/proc logic mirrors
-        ! that routine.
+        ! Dedicated halo exchange (buffers sized for n_lso_stat, packed on the host); tag/proc logic
+        ! mirrors s_mpi_sendrecv_variables_buffers.
         select case (mpi_dir)
         case (1)
             beg_end = (/bc_x%beg, bc_x%end/)
@@ -2094,59 +2058,10 @@ contains
 
     end subroutine s_lso_stat_ghost_refresh
 
-    !> Stat-field analog of s_lso_stride_sample. Uses the same trilinear interpolation approach.
+    !> Decimate the stat fields onto the coarse grid (same mapping as s_lso_stride_sample).
     impure subroutine s_lso_stat_stride_sample()
 
-        integer  :: i, j, k, l
-        integer  :: j0, j1, k0, k1, l0, l1
-        real(wp) :: alpha, beta, gamma_pos, wj, wk, wl
-
-        do i = 1, n_lso_stat
-            do l = 0, p_lso_ds
-                ! Global-coordinate mapping (start_idx is the rank's global cell offset; the
-                ! coarse offset is start_idx/factor, matching the MPI-IO subarray start). This
-                ! builds one consistent global coarse grid across ranks; j1 = j0 + 1 reads the
-                ! refreshed ghost cells across rank/periodic boundaries instead of clamping.
-                ! In serial (start_idx = 0, *_glb = local) this reduces to the previous mapping.
-                if (p_lso_ds > 0) then
-                    gamma_pos = real(start_idx(3)/lso_down_sample_factor + l, wp)*real(p_glb, wp)/real(p_glb_lso_ds, &
-                                     & wp) - real(start_idx(3), wp)
-                    l0 = floor(gamma_pos); l1 = l0 + 1; wl = gamma_pos - real(l0, wp)
-                else
-                    l0 = 0; l1 = 0; wl = 0._wp
-                end if
-
-                do k = 0, n_lso_ds
-                    if (n_lso_ds > 0) then
-                        beta = real(start_idx(2)/lso_down_sample_factor + k, wp)*real(n_glb, wp)/real(n_glb_lso_ds, &
-                                    & wp) - real(start_idx(2), wp)
-                        k0 = floor(beta); k1 = k0 + 1; wk = beta - real(k0, wp)
-                    else
-                        k0 = 0; k1 = 0; wk = 0._wp
-                    end if
-
-                    do j = 0, m_lso_ds
-                        if (m_lso_ds > 0) then
-                            alpha = real(start_idx(1)/lso_down_sample_factor + j, wp)*real(m_glb, wp)/real(m_glb_lso_ds, &
-                                         & wp) - real(start_idx(1), wp)
-                            j0 = floor(alpha); j1 = j0 + 1; wj = alpha - real(j0, wp)
-                        else
-                            j0 = 0; j1 = 0; wj = 0._wp
-                        end if
-
-                        q_lso_stat_ds_vf(i)%sf(j, k, &
-                                         & l) = real((1._wp - wj)*(1._wp - wk)*(1._wp - wl)*real(q_lso_stat_vf(i)%sf(j0, k0, l0), &
-                                         & wp) + wj*(1._wp - wk)*(1._wp - wl)*real(q_lso_stat_vf(i)%sf(j1, k0, l0), &
-                                         & wp) + (1._wp - wj)*wk*(1._wp - wl)*real(q_lso_stat_vf(i)%sf(j0, k1, l0), &
-                                         & wp) + wj*wk*(1._wp - wl)*real(q_lso_stat_vf(i)%sf(j1, k1, l0), &
-                                         & wp) + (1._wp - wj)*(1._wp - wk)*wl*real(q_lso_stat_vf(i)%sf(j0, k0, l1), &
-                                         & wp) + wj*(1._wp - wk)*wl*real(q_lso_stat_vf(i)%sf(j1, k0, l1), &
-                                         & wp) + (1._wp - wj)*wk*wl*real(q_lso_stat_vf(i)%sf(j0, k1, l1), &
-                                         & wp) + wj*wk*wl*real(q_lso_stat_vf(i)%sf(j1, k1, l1), wp), stp)
-                    end do
-                end do
-            end do
-        end do
+        call s_lso_stride_sample(q_lso_stat_vf(1:n_lso_stat), q_lso_stat_ds_vf(1:n_lso_stat))
 
     end subroutine s_lso_stat_stride_sample
 

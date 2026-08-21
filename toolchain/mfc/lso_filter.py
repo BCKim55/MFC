@@ -133,9 +133,7 @@ def find_min_lso_passes(
 
 
 def _worst_partial_product(coeffs_list: List[Tuple[float, ...]], xi: np.ndarray) -> float:
-    """Peak magnitude of the running partial product as the passes are applied in
-    order. 1.0 is ideal (the cascade never amplifies); large values mean the
-    sequential application blows up mid-cascade before later passes cancel it."""
+    """Peak magnitude of the running partial product over the pass sequence (1.0 = never amplifies)."""
     P = np.ones_like(xi)
     worst = 1.0
     for c in coeffs_list:
@@ -145,12 +143,8 @@ def _worst_partial_product(coeffs_list: List[Tuple[float, ...]], xi: np.ndarray)
 
 
 def reorder_passes_for_conditioning(coeffs_list: List[Tuple[float, ...]], xi: np.ndarray) -> List[Tuple[float, ...]]:
-    """Greedily reorder passes so the intermediate partial products stay as small as
-    possible. The composed transfer function is unchanged (passes multiply, so they
-    commute); only the numerical conditioning of the sequential Fortran application
-    improves. Without this, a high-gain pass early in the cascade can amplify high
-    wavenumbers by huge factors, which per-pass stp rounding then loses near sharp
-    features (e.g. immersed-boundary steps), leaving spurious discontinuities."""
+    """Greedily reorder passes to minimize the running partial product. The composed
+    transfer function is unchanged; only the conditioning of the sequential application improves."""
     if len(coeffs_list) <= 1:
         return list(coeffs_list)
 
@@ -188,9 +182,7 @@ def compute_lso_params(
     xi = np.linspace(0.0, np.pi, _N_XI)
     for tag, d in directions:
         sigma_target = filter_sigma / d
-        # Finite-precision stability wall of the repeated 9-point cascade on
-        # discontinuous input (see filt_test/SESSION_HANDOFF.md): reliable to
-        # sigma ~40 cells, catastrophic blow-up by ~50.
+        # Finite-precision stability limit of the repeated 9-point cascade.
         if sigma_target > 45.0:
             raise ValueError(
                 f"LSO filter: sigma = {sigma_target:.1f} cells in {tag} exceeds the "
@@ -198,16 +190,13 @@ def compute_lso_params(
                 f"smaller in-situ width and compose to the target in post_process "
                 f"(lso_filter_sigma_in/lso_filter_sigma_target), or coarsen the grid."
             )
-        if sigma_target > 40.0:
-            print(f"  [LSO] WARNING: sigma = {sigma_target:.1f} cells in {tag} is near the ~45-cell stability limit; consider a smaller in-situ width composed in post_process.")
         n_passes, err, coeffs = find_min_lso_passes(sigma_target, conv_tol=conv_tol, max_passes=max_passes)
-        gain_before = _worst_partial_product(coeffs, xi)
         coeffs = reorder_passes_for_conditioning(coeffs, xi)
-        gain_after = _worst_partial_product(coeffs, xi)
+        gain = _worst_partial_product(coeffs, xi)
         result[f"lso_n_passes_{tag}"] = n_passes
         result[f"lso_a_{tag}"] = coeffs
         n_res_note = f"N_res={d_p / d:.2f}, " if d_p > 0.0 else ""
-        print(f"  [LSO] {tag}-dir: {n_res_note}sigma_target={sigma_target:.2f} cells, N_passes={n_passes}, L2_err={err:.2e}, peak_partial_gain={gain_before:.1e}->{gain_after:.1e}")
+        print(f"  [LSO] {tag}-dir: {n_res_note}sigma_target={sigma_target:.2f} cells, N_passes={n_passes}, L2_err={err:.2e}, peak_partial_gain={gain:.1e}")
 
     if dy <= 0.0:
         result["lso_n_passes_y"] = 0

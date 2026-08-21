@@ -927,10 +927,7 @@ contains
             end if
             lso_file_prefix = ''
 
-            ! Write the filtered gas-mask (normalized-convolution weight w) so
-            ! post_process can compose an additional filter exactly:
-            ! filter2(w*qhat)/filter2(w). With downsampling the mask was already
-            ! decimated (and stage-2 filtered under the two-stage pyramid) above.
+            ! Write the filtered gas mask w so post_process can compose filter2(w*qhat)/filter2(w).
             if (ib) then
                 if (lso_down_sample_factor > 1) then
                     call s_write_lso_stat_file(q_lso_mask_ds_vf, 1, save_count, 'lso_mask_')
@@ -946,9 +943,7 @@ contains
                 if (lso_down_sample_factor > 1) then
                     call nvtxStartRange("LSO-COARSEN-STAT")
                     call s_lso_stat_stride_sample()
-                    ! Two-stage pyramid: stat products are linear in the filter, so
-                    ! applying sigma2 to the decimated sigma1-filtered products yields
-                    ! the target-width filtered products exactly.
+                    ! Stat products are linear in the filter, so stage 2 brings them to the target width exactly.
                     if (lso2_n_passes_x > 0) call s_apply_lso_filter_coarse(q_lso_stat_ds_vf)
                     call nvtxEndRange
                     call s_write_lso_stat_file(q_lso_stat_ds_vf, n_lso_stat, save_count)
