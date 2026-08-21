@@ -290,18 +290,6 @@ contains
             call s_apply_lso_filter(q_filt_vf)
         end if
 
-        ! Refresh ghost cells so the down-sample interpolation reads neighbour-rank / periodic data.
-        if (lso_down_sample_factor > 1) then
-            call s_lso_filter_ghost_refresh(q_filt_vf, 1)
-            if (n > 0) call s_lso_filter_ghost_refresh(q_filt_vf, 2)
-            if (p > 0) call s_lso_filter_ghost_refresh(q_filt_vf, 3)
-            if (ib) then
-                call s_lso_filter_ghost_refresh(q_lso_mask_vf, 1)
-                if (n > 0) call s_lso_filter_ghost_refresh(q_lso_mask_vf, 2)
-                if (p > 0) call s_lso_filter_ghost_refresh(q_lso_mask_vf, 3)
-            end if
-        end if
-
         if (lso_stat_wrt .and. n_lso_stat > 0) then
             call nvtxStartRange("LSO-FILTER-STAT")
             ! Refresh q_cons_vf rank-boundary ghost cells before Pass 2 centred
@@ -329,11 +317,6 @@ contains
                     end do
                 end do
                 $:END_GPU_PARALLEL_LOOP()
-            end if
-            if (lso_down_sample_factor > 1) then
-                call s_lso_stat_ghost_refresh(1)
-                if (n > 0) call s_lso_stat_ghost_refresh(2)
-                if (p > 0) call s_lso_stat_ghost_refresh(3)
             end if
 #ifndef FRONTIER_UNIFIED
             ! Pull filtered stat fields back to host for the file write.
@@ -497,11 +480,12 @@ contains
         nv = size(q_src_vf)
         do i = 1, nv
             do l = 0, p_lso_ds
-                ! Global coarse index -> fine position; the coarse offset start_idx/factor matches the MPI-IO
-                ! subarray start, and j1 = j0 + 1 reads refreshed ghost cells across rank/periodic boundaries.
+                ! Sample at the coarse-cell centres: fine position (J + 1/2)(m_glb + 1)/(m_glb_ds + 1) - 1/2 for the
+                ! global coarse index J = start_idx/factor + j, so the sample spacing equals the coarse cell size
+                ! (interior-only reads for factor >= 2).
                 if (p_lso_ds > 0) then
-                    gamma_pos = real(start_idx(3)/lso_down_sample_factor + l, wp)*real(p_glb, wp)/real(p_glb_lso_ds, &
-                                     & wp) - real(start_idx(3), wp)
+                    gamma_pos = (real(start_idx(3)/lso_down_sample_factor + l, wp) + 0.5_wp)*real(p_glb + 1, &
+                                 & wp)/real(p_glb_lso_ds + 1, wp) - 0.5_wp - real(start_idx(3), wp)
                     l0 = floor(gamma_pos); l1 = l0 + 1; wl = gamma_pos - real(l0, wp)
                 else
                     l0 = 0; l1 = 0; wl = 0._wp
@@ -509,8 +493,8 @@ contains
 
                 do k = 0, n_lso_ds
                     if (n_lso_ds > 0) then
-                        beta = real(start_idx(2)/lso_down_sample_factor + k, wp)*real(n_glb, wp)/real(n_glb_lso_ds, &
-                                    & wp) - real(start_idx(2), wp)
+                        beta = (real(start_idx(2)/lso_down_sample_factor + k, wp) + 0.5_wp)*real(n_glb + 1, &
+                                & wp)/real(n_glb_lso_ds + 1, wp) - 0.5_wp - real(start_idx(2), wp)
                         k0 = floor(beta); k1 = k0 + 1; wk = beta - real(k0, wp)
                     else
                         k0 = 0; k1 = 0; wk = 0._wp
@@ -518,8 +502,8 @@ contains
 
                     do j = 0, m_lso_ds
                         if (m_lso_ds > 0) then
-                            alpha = real(start_idx(1)/lso_down_sample_factor + j, wp)*real(m_glb, wp)/real(m_glb_lso_ds, &
-                                         & wp) - real(start_idx(1), wp)
+                            alpha = (real(start_idx(1)/lso_down_sample_factor + j, wp) + 0.5_wp)*real(m_glb + 1, &
+                                     & wp)/real(m_glb_lso_ds + 1, wp) - 0.5_wp - real(start_idx(1), wp)
                             j0 = floor(alpha); j1 = j0 + 1; wj = alpha - real(j0, wp)
                         else
                             j0 = 0; j1 = 0; wj = 0._wp
