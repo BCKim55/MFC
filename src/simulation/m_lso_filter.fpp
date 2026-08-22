@@ -475,7 +475,13 @@ contains
         type(scalar_field), intent(inout) :: q_dst_vf(:)
         integer                           :: i, j, k, l, nv
         integer                           :: j0, j1, k0, k1, l0, l1
+        integer                           :: sidx(3)
         real(wp)                          :: alpha, beta, gamma_pos, wj, wk, wl
+
+        ! Global offset of this rank's block (start_idx is only allocated with parallel_io).
+
+        sidx = 0
+        if (allocated(start_idx)) sidx(1:size(start_idx)) = start_idx
 
         nv = size(q_src_vf)
         do i = 1, nv
@@ -484,8 +490,8 @@ contains
                 ! global coarse index J = start_idx/factor + j, so the sample spacing equals the coarse cell size
                 ! (interior-only reads for factor >= 2).
                 if (p_lso_ds > 0) then
-                    gamma_pos = (real(start_idx(3)/lso_down_sample_factor + l, wp) + 0.5_wp)*real(p_glb + 1, &
-                                 & wp)/real(p_glb_lso_ds + 1, wp) - 0.5_wp - real(start_idx(3), wp)
+                    gamma_pos = (real(sidx(3)/lso_down_sample_factor + l, wp) + 0.5_wp)*real(p_glb + 1, &
+                                 & wp)/real(p_glb_lso_ds + 1, wp) - 0.5_wp - real(sidx(3), wp)
                     l0 = floor(gamma_pos); l1 = l0 + 1; wl = gamma_pos - real(l0, wp)
                 else
                     l0 = 0; l1 = 0; wl = 0._wp
@@ -493,8 +499,8 @@ contains
 
                 do k = 0, n_lso_ds
                     if (n_lso_ds > 0) then
-                        beta = (real(start_idx(2)/lso_down_sample_factor + k, wp) + 0.5_wp)*real(n_glb + 1, &
-                                & wp)/real(n_glb_lso_ds + 1, wp) - 0.5_wp - real(start_idx(2), wp)
+                        beta = (real(sidx(2)/lso_down_sample_factor + k, wp) + 0.5_wp)*real(n_glb + 1, wp)/real(n_glb_lso_ds + 1, &
+                                & wp) - 0.5_wp - real(sidx(2), wp)
                         k0 = floor(beta); k1 = k0 + 1; wk = beta - real(k0, wp)
                     else
                         k0 = 0; k1 = 0; wk = 0._wp
@@ -502,8 +508,8 @@ contains
 
                     do j = 0, m_lso_ds
                         if (m_lso_ds > 0) then
-                            alpha = (real(start_idx(1)/lso_down_sample_factor + j, wp) + 0.5_wp)*real(m_glb + 1, &
-                                     & wp)/real(m_glb_lso_ds + 1, wp) - 0.5_wp - real(start_idx(1), wp)
+                            alpha = (real(sidx(1)/lso_down_sample_factor + j, wp) + 0.5_wp)*real(m_glb + 1, &
+                                     & wp)/real(m_glb_lso_ds + 1, wp) - 0.5_wp - real(sidx(1), wp)
                             j0 = floor(alpha); j1 = j0 + 1; wj = alpha - real(j0, wp)
                         else
                             j0 = 0; j1 = 0; wj = 0._wp

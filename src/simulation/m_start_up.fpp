@@ -927,8 +927,8 @@ contains
             end if
             lso_file_prefix = ''
 
-            ! Write the filtered gas mask w so post_process can compose filter2(w*qhat)/filter2(w).
-            if (ib) then
+            ! Write the filtered gas mask w (MPI-IO) so post_process can compose filter2(w*qhat)/filter2(w).
+            if (ib .and. parallel_io) then
                 if (lso_down_sample_factor > 1) then
                     call s_write_lso_stat_file(q_lso_mask_ds_vf, 1, save_count, 'lso_mask_')
                 else
@@ -939,7 +939,7 @@ contains
                 end if
             end if
 
-            if (lso_stat_wrt .and. n_lso_stat > 0) then
+            if (lso_stat_wrt .and. n_lso_stat > 0 .and. parallel_io) then
                 if (lso_down_sample_factor > 1) then
                     call nvtxStartRange("LSO-COARSEN-STAT")
                     call s_lso_stat_stride_sample()
@@ -953,7 +953,7 @@ contains
             end if
         end if
 
-        ! Serial/Silo path: also dump the filtered copy under <case_dir>_lso.
+        ! Serial path: also dump the (full-resolution) filtered copy under <case_dir>/lso.
         if (lso_filter .and. lso_filter_wrt .and. .not. parallel_io) then
             do i = 1, sys_size
 #ifndef FRONTIER_UNIFIED
@@ -961,7 +961,7 @@ contains
 #endif
             end do
             orig_case_dir = case_dir
-            case_dir = trim(case_dir) // '_lso'
+            case_dir = trim(case_dir) // '/lso'
             if (bubbles_lagrange) then
                 call s_write_data_files(q_filt_vf, q_T_sf, q_prim_vf, save_count, bc_type, q_beta(1))
             else

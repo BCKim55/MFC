@@ -272,7 +272,7 @@ DESCRIPTIONS = {
     "lso2_a_y": "Stage-2 per-pass 9-point stencil coefficients in y (5 x lso_max_passes, auto-computed)",
     "lso2_a_z": "Stage-2 per-pass 9-point stencil coefficients in z (5 x lso_max_passes, auto-computed)",
     "lso_down_sample_factor": "Stride factor for coarsening the filtered output grid (1 = no coarsening)",
-    "lso_stat_wrt": "Write filtered statistical fields (volume fraction, momentum, Reynolds stresses, heat fluxes) to lso_stat_<t>.dat. Requires lso_filter_wrt=True.",
+    "lso_stat_wrt": "Write filtered statistical fields (volume fraction, momentum, Reynolds stresses, heat fluxes) to lso_stat_<t>.dat. Requires lso_filter_wrt=True and parallel_io=True.",
     "lso_R_gas": "Specific gas constant [J/(kg·K)] for temperature reconstruction used in stat fields. Default 287.0 (dry air).",
     # LSO post-process filter
     "lso_pp_filter": "Apply an additional LSO filter pass in post_process before writing output, to the in-situ filtered data (lso_filter_wrt=True) or to the original data (lso_filter_wrt=False)",

@@ -657,7 +657,7 @@ To restart the simulation from $k$-th time step, see @ref running "Restarting Ca
 | `lso_filter`            | Logical | Apply a least-squares optimized (LSO) variable-weight Gaussian filter to conserved variables at each save step |
 | `lso_filter_wrt`        | Logical | Write LSO-filtered fields with an lso_ filename prefix alongside unfiltered data |
 | `lso_down_sample_factor`| Integer | Stride factor for coarsening the filtered output grid (1 = no coarsening) |
-| `lso_stat_wrt`          | Logical | Write filtered statistical fields (volume fraction, momentum, Reynolds stresses, heat fluxes) to lso_stat_&lt;t&gt;.dat. Requires lso_filter_wrt=True. |
+| `lso_stat_wrt`          | Logical | Write filtered statistical fields (volume fraction, momentum, Reynolds stresses, heat fluxes) to lso_stat_&lt;t&gt;.dat. Requires lso_filter_wrt=True and parallel_io=True. |
 | `lso_R_gas`             | Real    | Specific gas constant [J/(kg·K)] for temperature reconstruction used in stat fields. Default 287.0 (dry air). |
 | `filter_sigma`          | Real    | Target Gaussian filter standard deviation in physical units |
 | `lso_n_passes_x`        | Integer | Number of filter passes in x (auto-computed by toolchain from `filter_sigma` and grid spacing) |
