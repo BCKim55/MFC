@@ -292,13 +292,11 @@ contains
 
         if (lso_stat_wrt .and. n_lso_stat > 0) then
             call nvtxStartRange("LSO-FILTER-STAT")
-            ! Refresh q_cons_vf rank-boundary ghost cells before Pass 2 centred
-            ! differences, for the same reason the filter does a pre-pass exchange:
-            ! ghost cells may reflect an intermediate RK sub-step rather than the
-            ! final updated interior, causing spurious tau at MPI rank boundaries.
-            call s_lso_filter_ghost_refresh(q_cons_vf, 1, ib_edge_fixup=.true.)
-            if (n > 0) call s_lso_filter_ghost_refresh(q_cons_vf, 2, ib_edge_fixup=.true.)
-            if (p > 0) call s_lso_filter_ghost_refresh(q_cons_vf, 3, ib_edge_fixup=.true.)
+            ! Refresh q_cons_vf rank-boundary ghost cells before the Pass 2 centred differences:
+            ! ghosts may otherwise hold an intermediate RK sub-step rather than the updated interior.
+            call s_lso_filter_ghost_refresh(q_cons_vf, 1)
+            if (n > 0) call s_lso_filter_ghost_refresh(q_cons_vf, 2)
+            if (p > 0) call s_lso_filter_ghost_refresh(q_cons_vf, 3)
             call s_compute_lso_stat_fields(q_cons_vf)
             call s_apply_lso_stat_filter()
             ! Zero tau/q/rhotau_u inside IB after filtering so the filter stencil
@@ -843,19 +841,13 @@ contains
     !> Refresh ghost cells between filter passes for direction mpi_dir (1=x, 2=y, 3=z). MPI ghosts come via sendrecv, then
     !! IBM-flagged ghosts are zero-extrapolated to keep particle velocity out of the fluid stencil. BC_GHOST_EXTRAP faces are
     !! re-extrapolated from the current edge cell; other physical BCs are left as is.
-    impure subroutine s_lso_filter_ghost_refresh(q_cons_vf, mpi_dir, ib_edge_fixup)
+    impure subroutine s_lso_filter_ghost_refresh(q_cons_vf, mpi_dir)
 
         type(scalar_field), intent(inout) :: q_cons_vf(:)
         integer, intent(in)               :: mpi_dir
-        logical, intent(in), optional     :: ib_edge_fixup
         integer                           :: i, j, k, l, beg_bc, end_bc, nv
-        logical                           :: fixup
 
         nv = size(q_cons_vf)
-        ! The IBM edge fixup (solid-flagged MPI ghosts <- interior edge cell) applies to the raw conserved
-        ! state ahead of the stat gradient stencils only; it must stay off during the filter cascade.
-        fixup = .false.
-        if (present(ib_edge_fixup)) fixup = ib_edge_fixup
 
         select case (mpi_dir)
         case (1)
@@ -876,8 +868,6 @@ contains
 #endif
 
         ! BC_GHOST_EXTRAP: re-extrapolate from the filtered edge cell each pass.
-        ! IBM fixup (MPI ghosts only): overwrite IBM-flagged ghost values by the
-        ! interior edge cell so particle velocity does not feed the fluid stencil.
         select case (mpi_dir)
         case (1)
             if (beg_bc == BC_GHOST_EXTRAP) then
@@ -931,38 +921,6 @@ contains
                 end do
             end if
 #ifdef MFC_MPI
-            if (ib .and. fixup) then
-                if (beg_bc >= 0) then
-                    do i = 1, nv
-                        $:GPU_PARALLEL_LOOP(collapse=3, private='[j, k, l]')
-                        do l = 0, p
-                            do k = 0, n
-                                do j = 1, buff_size
-                                    if (ib_markers%sf(-j, k, l) /= 0) then
-                                        q_cons_vf(i)%sf(-j, k, l) = q_cons_vf(i)%sf(0, k, l)
-                                    end if
-                                end do
-                            end do
-                        end do
-                        $:END_GPU_PARALLEL_LOOP()
-                    end do
-                end if
-                if (end_bc >= 0) then
-                    do i = 1, nv
-                        $:GPU_PARALLEL_LOOP(collapse=3, private='[j, k, l]')
-                        do l = 0, p
-                            do k = 0, n
-                                do j = 1, buff_size
-                                    if (ib_markers%sf(m + j, k, l) /= 0) then
-                                        q_cons_vf(i)%sf(m + j, k, l) = q_cons_vf(i)%sf(m, k, l)
-                                    end if
-                                end do
-                            end do
-                        end do
-                        $:END_GPU_PARALLEL_LOOP()
-                    end do
-                end if
-            end if
 #endif
         case (2)
             if (beg_bc == BC_GHOST_EXTRAP) then
@@ -1016,38 +974,6 @@ contains
                 end do
             end if
 #ifdef MFC_MPI
-            if (ib .and. fixup) then
-                if (beg_bc >= 0) then
-                    do i = 1, nv
-                        $:GPU_PARALLEL_LOOP(collapse=3, private='[j, k, l]')
-                        do l = 0, p
-                            do k = 1, buff_size
-                                do j = 0, m
-                                    if (ib_markers%sf(j, -k, l) /= 0) then
-                                        q_cons_vf(i)%sf(j, -k, l) = q_cons_vf(i)%sf(j, 0, l)
-                                    end if
-                                end do
-                            end do
-                        end do
-                        $:END_GPU_PARALLEL_LOOP()
-                    end do
-                end if
-                if (end_bc >= 0) then
-                    do i = 1, nv
-                        $:GPU_PARALLEL_LOOP(collapse=3, private='[j, k, l]')
-                        do l = 0, p
-                            do k = 1, buff_size
-                                do j = 0, m
-                                    if (ib_markers%sf(j, n + k, l) /= 0) then
-                                        q_cons_vf(i)%sf(j, n + k, l) = q_cons_vf(i)%sf(j, n, l)
-                                    end if
-                                end do
-                            end do
-                        end do
-                        $:END_GPU_PARALLEL_LOOP()
-                    end do
-                end if
-            end if
 #endif
         case (3)
             if (beg_bc == BC_GHOST_EXTRAP) then
@@ -1101,38 +1027,6 @@ contains
                 end do
             end if
 #ifdef MFC_MPI
-            if (ib .and. fixup) then
-                if (beg_bc >= 0) then
-                    do i = 1, nv
-                        $:GPU_PARALLEL_LOOP(collapse=3, private='[j, k, l]')
-                        do l = 1, buff_size
-                            do k = 0, n
-                                do j = 0, m
-                                    if (ib_markers%sf(j, k, -l) /= 0) then
-                                        q_cons_vf(i)%sf(j, k, -l) = q_cons_vf(i)%sf(j, k, 0)
-                                    end if
-                                end do
-                            end do
-                        end do
-                        $:END_GPU_PARALLEL_LOOP()
-                    end do
-                end if
-                if (end_bc >= 0) then
-                    do i = 1, nv
-                        $:GPU_PARALLEL_LOOP(collapse=3, private='[j, k, l]')
-                        do l = 1, buff_size
-                            do k = 0, n
-                                do j = 0, m
-                                    if (ib_markers%sf(j, k, p + l) /= 0) then
-                                        q_cons_vf(i)%sf(j, k, p + l) = q_cons_vf(i)%sf(j, k, p)
-                                    end if
-                                end do
-                            end do
-                        end do
-                        $:END_GPU_PARALLEL_LOOP()
-                    end do
-                end if
-            end if
 #endif
         end select
 
