@@ -1286,7 +1286,6 @@ contains
                     do k = 0, n
                         do j = j_beg_x, j_end_x
                             rho_loc = max(real(q_cons_vf(eqn_idx%cont%beg)%sf(j, 0, 0), wp), sgm_eps)
-                            gas_mask = 1._wp - real(q_lso_stat_vf(lso_stat_phi_p_beg)%sf(j, 0, 0), wp)
 
                             rho_jm = max(real(q_cons_vf(eqn_idx%cont%beg)%sf(j - 1, 0, 0), wp), sgm_eps)
                             u1_jm = real(q_cons_vf(eqn_idx%mom%beg)%sf(j - 1, 0, 0), wp)/rho_jm
@@ -1321,7 +1320,6 @@ contains
                     do k = k_beg_y, k_end_y
                         do j = j_beg_x, j_end_x
                             rho_loc = max(real(q_cons_vf(eqn_idx%cont%beg)%sf(j, k, 0), wp), sgm_eps)
-                            gas_mask = 1._wp - real(q_lso_stat_vf(lso_stat_phi_p_beg)%sf(j, k, 0), wp)
 
                             rho_jm = max(real(q_cons_vf(eqn_idx%cont%beg)%sf(j - 1, k, 0), wp), sgm_eps)
                             u1_jm = real(q_cons_vf(eqn_idx%mom%beg)%sf(j - 1, k, 0), wp)/rho_jm
@@ -1385,7 +1383,6 @@ contains
                     do k = k_beg_y, k_end_y
                         do j = j_beg_x, j_end_x
                             rho_loc = max(real(q_cons_vf(eqn_idx%cont%beg)%sf(j, k, l), wp), sgm_eps)
-                            gas_mask = 1._wp - real(q_lso_stat_vf(lso_stat_phi_p_beg)%sf(j, k, l), wp)
 
                             rho_jm = max(real(q_cons_vf(eqn_idx%cont%beg)%sf(j - 1, k, l), wp), sgm_eps)
                             u1_jm = real(q_cons_vf(eqn_idx%mom%beg)%sf(j - 1, k, l), wp)/rho_jm
