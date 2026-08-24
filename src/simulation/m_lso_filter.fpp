@@ -299,23 +299,6 @@ contains
             if (p > 0) call s_lso_filter_ghost_refresh(q_cons_vf, 3)
             call s_compute_lso_stat_fields(q_cons_vf)
             call s_apply_lso_stat_filter()
-            ! Zero tau/q/rhotau_u inside IB after filtering so the filter stencil
-            ! sees continuous (unmasked) values, preserving symmetry around IB particles.
-            if (ib) then
-                $:GPU_PARALLEL_LOOP(collapse=3, private='[i, j, k, l]')
-                do l = 0, p
-                    do k = 0, n
-                        do j = 0, m
-                            if (ib_markers%sf(j, k, l) > 0) then
-                                do i = lso_stat_tau_beg, n_lso_stat
-                                    q_lso_stat_vf(i)%sf(j, k, l) = 0._stp
-                                end do
-                            end if
-                        end do
-                    end do
-                end do
-                $:END_GPU_PARALLEL_LOOP()
-            end if
 #ifndef FRONTIER_UNIFIED
             ! Pull filtered stat fields back to host for the file write.
             do i = 1, n_lso_stat
@@ -1158,7 +1141,10 @@ contains
         end do
         $:END_GPU_PARALLEL_LOOP()
 
-        ! Pass 2: viscous stress, heat flux, viscous power flux from centred diffs.
+        ! Pass 2: viscous stress, heat flux, viscous power flux from centred diffs, phase-weighted by the
+        ! gas mask like the algebraic blocks (post_process recovers the intensive averages by dividing by
+        ! the filtered mask w). Stencils read the raw (unmasked) state, so the image-point fill inside the
+        ! IB supplies the wall condition for surface-adjacent gradients.
         ! Boundary ranges: skip cells within buff_size of a physical boundary, since the centred-difference
         ! stencil would reach into solver BC ghost cells (e.g. slip-wall reflections, inlet values) that are
         ! not appropriate for viscous gradient evaluation. Cells outside these ranges keep tau=q=0 from Pass 1.
@@ -1180,6 +1166,7 @@ contains
                     do k = 0, n
                         do j = j_beg_x, j_end_x
                             rho_loc = max(real(q_cons_vf(eqn_idx%cont%beg)%sf(j, 0, 0), wp), sgm_eps)
+                            gas_mask = 1._wp - real(q_lso_stat_vf(lso_stat_phi_p_beg)%sf(j, 0, 0), wp)
 
                             rho_jm = max(real(q_cons_vf(eqn_idx%cont%beg)%sf(j - 1, 0, 0), wp), sgm_eps)
                             u1_jm = real(q_cons_vf(eqn_idx%mom%beg)%sf(j - 1, 0, 0), wp)/rho_jm
@@ -1200,9 +1187,9 @@ contains
 
                             u1 = real(q_cons_vf(eqn_idx%mom%beg)%sf(j, 0, 0), wp)/rho_loc
 
-                            q_lso_stat_vf(lso_stat_tau_beg)%sf(j, 0, 0) = real(tau11, stp)
-                            q_lso_stat_vf(lso_stat_q_beg)%sf(j, 0, 0) = real(q1, stp)
-                            q_lso_stat_vf(lso_stat_rhotau_u_beg)%sf(j, 0, 0) = real(rho_loc*tau11*u1, stp)
+                            q_lso_stat_vf(lso_stat_tau_beg)%sf(j, 0, 0) = real(gas_mask*tau11, stp)
+                            q_lso_stat_vf(lso_stat_q_beg)%sf(j, 0, 0) = real(gas_mask*q1, stp)
+                            q_lso_stat_vf(lso_stat_rhotau_u_beg)%sf(j, 0, 0) = real(gas_mask*rho_loc*tau11*u1, stp)
                         end do
                     end do
                 end do
@@ -1214,6 +1201,7 @@ contains
                     do k = k_beg_y, k_end_y
                         do j = j_beg_x, j_end_x
                             rho_loc = max(real(q_cons_vf(eqn_idx%cont%beg)%sf(j, k, 0), wp), sgm_eps)
+                            gas_mask = 1._wp - real(q_lso_stat_vf(lso_stat_phi_p_beg)%sf(j, k, 0), wp)
 
                             rho_jm = max(real(q_cons_vf(eqn_idx%cont%beg)%sf(j - 1, k, 0), wp), sgm_eps)
                             u1_jm = real(q_cons_vf(eqn_idx%mom%beg)%sf(j - 1, k, 0), wp)/rho_jm
@@ -1259,13 +1247,13 @@ contains
                             u1 = real(q_cons_vf(eqn_idx%mom%beg)%sf(j, k, 0), wp)/rho_loc
                             u2 = real(q_cons_vf(eqn_idx%mom%beg + 1)%sf(j, k, 0), wp)/rho_loc
 
-                            q_lso_stat_vf(lso_stat_tau_beg)%sf(j, k, 0) = real(tau11, stp)
-                            q_lso_stat_vf(lso_stat_tau_beg + 1)%sf(j, k, 0) = real(tau12, stp)
-                            q_lso_stat_vf(lso_stat_tau_beg + 2)%sf(j, k, 0) = real(tau22, stp)
-                            q_lso_stat_vf(lso_stat_q_beg)%sf(j, k, 0) = real(q1, stp)
-                            q_lso_stat_vf(lso_stat_q_beg + 1)%sf(j, k, 0) = real(q2, stp)
-                            q_lso_stat_vf(lso_stat_rhotau_u_beg)%sf(j, k, 0) = real(rho_loc*(tau11*u1 + tau12*u2), stp)
-                            q_lso_stat_vf(lso_stat_rhotau_u_beg + 1)%sf(j, k, 0) = real(rho_loc*(tau12*u1 + tau22*u2), stp)
+                            q_lso_stat_vf(lso_stat_tau_beg)%sf(j, k, 0) = real(gas_mask*tau11, stp)
+                            q_lso_stat_vf(lso_stat_tau_beg + 1)%sf(j, k, 0) = real(gas_mask*tau12, stp)
+                            q_lso_stat_vf(lso_stat_tau_beg + 2)%sf(j, k, 0) = real(gas_mask*tau22, stp)
+                            q_lso_stat_vf(lso_stat_q_beg)%sf(j, k, 0) = real(gas_mask*q1, stp)
+                            q_lso_stat_vf(lso_stat_q_beg + 1)%sf(j, k, 0) = real(gas_mask*q2, stp)
+                            q_lso_stat_vf(lso_stat_rhotau_u_beg)%sf(j, k, 0) = real(gas_mask*rho_loc*(tau11*u1 + tau12*u2), stp)
+                            q_lso_stat_vf(lso_stat_rhotau_u_beg + 1)%sf(j, k, 0) = real(gas_mask*rho_loc*(tau12*u1 + tau22*u2), stp)
                         end do
                     end do
                 end do
@@ -1277,6 +1265,7 @@ contains
                     do k = k_beg_y, k_end_y
                         do j = j_beg_x, j_end_x
                             rho_loc = max(real(q_cons_vf(eqn_idx%cont%beg)%sf(j, k, l), wp), sgm_eps)
+                            gas_mask = 1._wp - real(q_lso_stat_vf(lso_stat_phi_p_beg)%sf(j, k, l), wp)
 
                             rho_jm = max(real(q_cons_vf(eqn_idx%cont%beg)%sf(j - 1, k, l), wp), sgm_eps)
                             u1_jm = real(q_cons_vf(eqn_idx%mom%beg)%sf(j - 1, k, l), wp)/rho_jm
@@ -1352,21 +1341,22 @@ contains
                             u2 = real(q_cons_vf(eqn_idx%mom%beg + 1)%sf(j, k, l), wp)/rho_loc
                             u3 = real(q_cons_vf(eqn_idx%mom%beg + 2)%sf(j, k, l), wp)/rho_loc
 
-                            q_lso_stat_vf(lso_stat_tau_beg)%sf(j, k, l) = real(tau11, stp)
-                            q_lso_stat_vf(lso_stat_tau_beg + 1)%sf(j, k, l) = real(tau12, stp)
-                            q_lso_stat_vf(lso_stat_tau_beg + 2)%sf(j, k, l) = real(tau13, stp)
-                            q_lso_stat_vf(lso_stat_tau_beg + 3)%sf(j, k, l) = real(tau22, stp)
-                            q_lso_stat_vf(lso_stat_tau_beg + 4)%sf(j, k, l) = real(tau23, stp)
-                            q_lso_stat_vf(lso_stat_tau_beg + 5)%sf(j, k, l) = real(tau33, stp)
-                            q_lso_stat_vf(lso_stat_q_beg)%sf(j, k, l) = real(q1, stp)
-                            q_lso_stat_vf(lso_stat_q_beg + 1)%sf(j, k, l) = real(q2, stp)
-                            q_lso_stat_vf(lso_stat_q_beg + 2)%sf(j, k, l) = real(q3, stp)
+                            q_lso_stat_vf(lso_stat_tau_beg)%sf(j, k, l) = real(gas_mask*tau11, stp)
+                            q_lso_stat_vf(lso_stat_tau_beg + 1)%sf(j, k, l) = real(gas_mask*tau12, stp)
+                            q_lso_stat_vf(lso_stat_tau_beg + 2)%sf(j, k, l) = real(gas_mask*tau13, stp)
+                            q_lso_stat_vf(lso_stat_tau_beg + 3)%sf(j, k, l) = real(gas_mask*tau22, stp)
+                            q_lso_stat_vf(lso_stat_tau_beg + 4)%sf(j, k, l) = real(gas_mask*tau23, stp)
+                            q_lso_stat_vf(lso_stat_tau_beg + 5)%sf(j, k, l) = real(gas_mask*tau33, stp)
+                            q_lso_stat_vf(lso_stat_q_beg)%sf(j, k, l) = real(gas_mask*q1, stp)
+                            q_lso_stat_vf(lso_stat_q_beg + 1)%sf(j, k, l) = real(gas_mask*q2, stp)
+                            q_lso_stat_vf(lso_stat_q_beg + 2)%sf(j, k, l) = real(gas_mask*q3, stp)
                             ! (tau u)_i = sum_j tau_ij u_j
-                            q_lso_stat_vf(lso_stat_rhotau_u_beg)%sf(j, k, l) = real(rho_loc*(tau11*u1 + tau12*u2 + tau13*u3), stp)
-                            q_lso_stat_vf(lso_stat_rhotau_u_beg + 1)%sf(j, k, l) = real(rho_loc*(tau12*u1 + tau22*u2 + tau23*u3), &
-                                          & stp)
-                            q_lso_stat_vf(lso_stat_rhotau_u_beg + 2)%sf(j, k, l) = real(rho_loc*(tau13*u1 + tau23*u2 + tau33*u3), &
-                                          & stp)
+                            q_lso_stat_vf(lso_stat_rhotau_u_beg)%sf(j, k, &
+                                          & l) = real(gas_mask*rho_loc*(tau11*u1 + tau12*u2 + tau13*u3), stp)
+                            q_lso_stat_vf(lso_stat_rhotau_u_beg + 1)%sf(j, k, &
+                                          & l) = real(gas_mask*rho_loc*(tau12*u1 + tau22*u2 + tau23*u3), stp)
+                            q_lso_stat_vf(lso_stat_rhotau_u_beg + 2)%sf(j, k, &
+                                          & l) = real(gas_mask*rho_loc*(tau13*u1 + tau23*u2 + tau33*u3), stp)
                         end do
                     end do
                 end do

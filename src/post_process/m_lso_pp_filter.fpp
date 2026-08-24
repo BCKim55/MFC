@@ -268,8 +268,8 @@ contains
     !! u]/rho_b and T~ from F[rho T] = (F[E] - F[rho|u|^2]/2)/Cv, F[E] = E_lso*w: R_sg,ij = F[rho u_i u_j] - F[rho u_i] F[rho
     !! u_j]/rho_b Q_T,i = gamma Cv (F[rho u_i T] - T~ F[rho u_i]) E_ku,i = (F[rho u_i |u|^2] - F[rho u_i] F[rho |u|^2]/rho_b)/2
     !! W_tau_u,i = (F[rho (tau.u)_i] - (tau_b . F[rho u])_i)/rho_b R_mu_sg = tau_b - mu [grad(u~) + grad(u~)^T - (2/3) div(u~) I]
-    !! R_lam_sg = q_b + lambda grad(T~) Gradients are centred differences on the output grid with ghost-refreshed Favre fields;
-    !! layout per f_lso_n_closure().
+    !! R_lam_sg = q_b + lambda grad(T~), with the intensive averages tau_b = F[g tau]/w and q_b = F[g q]/w. Gradients are centred
+    !! differences on the output grid with ghost-refreshed Favre fields; layout per f_lso_n_closure().
     impure subroutine s_compute_lso_closure_fields(q_stat_vf, q_cons_vf, w_vf, q_cls_vf)
 
         type(scalar_field), intent(in)    :: q_stat_vf(:), q_cons_vf(:), w_vf(1:1)
@@ -278,7 +278,7 @@ contains
         integer                           :: nd, nt, i, c, j, k, l, a, b
         integer                           :: ti(6), tj(6)
         integer                           :: i_rsg, i_qt, i_eku, i_wtu, i_rmu, i_rlam, i_tt, i_uf
-        real(wp)                          :: Cv, gcv, rho_b, F_E, dsp(3)
+        real(wp)                          :: Cv, gcv, rho_b, F_E, wloc, dsp(3)
         real(wp)                          :: rhou(3), tdotru(3), dudx(3, 3), dT(3), div_u, tau_res, tb(3, 3)
 
         nd = num_dims
@@ -330,9 +330,12 @@ contains
                     do a = 1, nd
                         rhou(a) = real(q_stat_vf(lso_stat_rhou_beg + a - 1)%sf(j, k, l), wp)
                     end do
+                    ! The viscous products are phase-weighted (F[g tau], F[g q]); divide by the
+                    ! filtered gas mask to recover the intensive gas-conditional averages.
+                    wloc = max(real(w_vf(1)%sf(j, k, l), wp), lso_w_floor)
                     tb = 0._wp
                     do c = 1, nt
-                        tb(ti(c), tj(c)) = real(q_stat_vf(lso_stat_tau_beg + c - 1)%sf(j, k, l), wp)
+                        tb(ti(c), tj(c)) = real(q_stat_vf(lso_stat_tau_beg + c - 1)%sf(j, k, l), wp)/wloc
                         tb(tj(c), ti(c)) = tb(ti(c), tj(c))
                     end do
 
@@ -385,7 +388,7 @@ contains
                     ! R_lam_sg (stored q = -lambda grad T; resolved uses the same sign)
                     do a = 1, nd
                         q_cls_vf(i_rlam + a)%sf(j, k, l) = real(real(q_stat_vf(lso_stat_q_beg + a - 1)%sf(j, k, l), &
-                                 & wp) - (-lso_conductivity*dT(a)), stp)
+                                 & wp)/wloc - (-lso_conductivity*dT(a)), stp)
                     end do
                     ! T_tilde, u_favre
                     q_cls_vf(i_tt + 1)%sf(j, k, l) = uT_vf(nd + 1)%sf(j, k, l)
