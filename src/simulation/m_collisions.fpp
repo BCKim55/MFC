@@ -108,6 +108,11 @@ contains
             ! call s_get_neighborhood_idx(pid1, pid1) ! global patch ID -> local index call s_get_neighborhood_idx(pid2, pid2)
             if (pid1 <= 0 .or. pid2 <= 0) cycle
 
+            ! Stationary IBs do not participate in collision forces. In particular, skip
+            ! before evaluating effective_mass so a zero-mass stationary particle cannot
+            ! trigger a division by zero in the pair-collision calculation.
+            if (patch_ib(pid1)%moving_ibm == 0 .or. patch_ib(pid2)%moving_ibm == 0) cycle
+
             centroid_1(1) = patch_ib(pid1)%x_centroid + real(xp1, wp)*(glb_bounds(1)%end - glb_bounds(1)%beg)
             centroid_1(2) = patch_ib(pid1)%y_centroid + real(yp1, wp)*(glb_bounds(2)%end - glb_bounds(2)%beg)
             centroid_1(3) = 0._wp
@@ -181,6 +186,9 @@ contains
                             & velocity]', copy='[forces, torques]', collapse=2)
         do patch_id = 1, num_ibs
             do i = 1, num_dims*2
+                ! Stationary particles do not participate in wall collisions.
+                if (patch_ib(patch_id)%moving_ibm == 0) cycle
+
                 ! only compute force contributions if there was an overlap
                 if (f_approx_equal(wall_overlap_distances(patch_id, i), 0._wp)) cycle
 

@@ -745,10 +745,12 @@ class CaseValidator:
                 f"particle_cloud({i})%periodic requires positive box lengths in each active dimension",
             )
 
-            # radius, mass, and num_particles are required and positive for every cloud, independent of
+            # radius and num_particles are required and positive for every cloud, independent of
             # geometry. An unset radius reaches the sampler as dflt_real, which makes min_dist negative and
             # corrupts both the spatial-hash bin index and the overlap test; an unset mass/num_particles is
-            # meaningless. The Fortran sampler cannot re-check these cheaply, so they belong here.
+            # meaningless. Zero mass is allowed for stationary particles (moving_ibm == 0); runtime code must
+            # avoid mass-dependent updates for those particles. The Fortran sampler cannot re-check these cheaply,
+            # so they belong here.
             self.prohibit(
                 num_particles is None or (self._is_numeric(num_particles) and num_particles <= 0),
                 f"particle_cloud({i})%num_particles must be specified and > 0",
@@ -758,8 +760,8 @@ class CaseValidator:
                 f"particle_cloud({i})%radius must be specified and > 0",
             )
             self.prohibit(
-                mass is None or (self._is_numeric(mass) and mass <= 0),
-                f"particle_cloud({i})%mass must be specified and > 0",
+                mass is None or (self._is_numeric(mass) and mass < 0),
+                f"particle_cloud({i})%mass must be specified and >= 0",
             )
             # A hemisphere shell in 1D degenerates to a half-annulus the y-extent check below cannot see
             # (it is skipped when n == 0), so reject it explicitly here.
