@@ -266,6 +266,17 @@ contains
                     alpha_rho_IP(1) = pres_IP*mw_IP/(T_IP*gas_constant)
                 end if
 
+                ! Isothermal surface (chemistry conduction): reflect the image-point temperature
+                ! about the wall value and rescale the mirrored density at constant pressure, so
+                ! the ghost encodes T_ghost = 2*Twall - T_IP and the diffusion flux sees the wall
+                ! temperature at the interface. The floor guards against negative reflected T.
+                if (chemistry .and. patch_ib(patch_id)%Twall > 0._wp) then
+                    call get_mixture_molecular_weight(Ys_IP, mw_IP)
+                    T_IP = pres_IP*mw_IP/(alpha_rho_IP(1)*gas_constant)
+                    T_IP = max(2._wp*patch_ib(patch_id)%Twall - T_IP, 0.1_wp*patch_ib(patch_id)%Twall)
+                    alpha_rho_IP(1) = pres_IP*mw_IP/(T_IP*gas_constant)
+                end if
+
                 dyn_pres = 0._wp
 
                 ! Set q_prim_vf params at GP so that mixture vars calculated properly

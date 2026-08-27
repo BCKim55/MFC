@@ -168,7 +168,7 @@ contains
         do i = 1, num_ibs
             #:for VAR in [ 'radius', 'length_x', 'length_y', 'length_z', &
                 & 'x_centroid', 'y_centroid', 'z_centroid', 'slip', 'mass', 'v_blow', &
-                & 'burn_rate_exp', 'burn_rate_pref']
+                & 'burn_rate_exp', 'burn_rate_pref', 'Twall']
                 call MPI_BCAST(patch_ib(i)%${VAR}$, 1, mpi_p, 0, MPI_COMM_WORLD, ierr)
             #:endfor
             #:for VAR in ['vel', 'angular_vel', 'angles']
