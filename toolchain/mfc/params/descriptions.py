@@ -222,6 +222,7 @@ DESCRIPTIONS = {
     "bf_x": "Enable body force in x-direction",
     "bf_y": "Enable body force in y-direction",
     "bf_z": "Enable body force in z-direction",
+    "bf_mom_only": "Body force adds momentum only (no energy source; thermostat)",
     "g_x": "Body force magnitude in x-direction",
     "g_y": "Body force magnitude in y-direction",
     "g_z": "Body force magnitude in z-direction",

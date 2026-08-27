@@ -345,8 +345,10 @@ contains
                 do k = bounds(2)%beg, bounds(2)%end
                     do j = bounds(1)%beg, bounds(1)%end
                         rhs_vf(eqn_idx%mom%beg)%sf(j, k, l) = rhs_vf(eqn_idx%mom%beg)%sf(j, k, l) + rhoM(j, k, l)*accel_bf(1)
-                        rhs_vf(eqn_idx%E)%sf(j, k, l) = rhs_vf(eqn_idx%E)%sf(j, k, l) + q_cons_vf(eqn_idx%mom%beg)%sf(j, k, &
-                               & l)*accel_bf(1)
+                        if (.not. bf_mom_only) then
+                            rhs_vf(eqn_idx%E)%sf(j, k, l) = rhs_vf(eqn_idx%E)%sf(j, k, l) + q_cons_vf(eqn_idx%mom%beg)%sf(j, k, &
+                                   & l)*accel_bf(1)
+                        end if
                     end do
                 end do
             end do
@@ -360,8 +362,10 @@ contains
                     do j = bounds(1)%beg, bounds(1)%end
                         rhs_vf(eqn_idx%mom%beg + 1)%sf(j, k, l) = rhs_vf(eqn_idx%mom%beg + 1)%sf(j, k, l) + rhoM(j, k, &
                                & l)*accel_bf(2)
-                        rhs_vf(eqn_idx%E)%sf(j, k, l) = rhs_vf(eqn_idx%E)%sf(j, k, l) + q_cons_vf(eqn_idx%mom%beg + 1)%sf(j, k, &
-                               & l)*accel_bf(2)
+                        if (.not. bf_mom_only) then
+                            rhs_vf(eqn_idx%E)%sf(j, k, l) = rhs_vf(eqn_idx%E)%sf(j, k, l) + q_cons_vf(eqn_idx%mom%beg + 1)%sf(j, &
+                                   & k, l)*accel_bf(2)
+                        end if
                     end do
                 end do
             end do
@@ -374,8 +378,10 @@ contains
                 do k = bounds(2)%beg, bounds(2)%end
                     do j = bounds(1)%beg, bounds(1)%end
                         rhs_vf(eqn_idx%mom%end)%sf(j, k, l) = rhs_vf(eqn_idx%mom%end)%sf(j, k, l) + rhoM(j, k, l)*accel_bf(3)
-                        rhs_vf(eqn_idx%E)%sf(j, k, l) = rhs_vf(eqn_idx%E)%sf(j, k, l) + q_cons_vf(eqn_idx%mom%end)%sf(j, k, &
-                               & l)*accel_bf(3)
+                        if (.not. bf_mom_only) then
+                            rhs_vf(eqn_idx%E)%sf(j, k, l) = rhs_vf(eqn_idx%E)%sf(j, k, l) + q_cons_vf(eqn_idx%mom%end)%sf(j, k, &
+                                   & l)*accel_bf(3)
+                        end if
                     end do
                 end do
             end do
