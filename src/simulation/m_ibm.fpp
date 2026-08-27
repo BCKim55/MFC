@@ -27,7 +27,7 @@ module m_ibm
 
     private :: s_compute_image_points, s_compute_interpolation_coeffs, s_interpolate_image_point, s_find_ghost_points, &
         & s_find_num_ghost_points
-    ; public :: s_initialize_ibm_module, s_ibm_setup, s_ibm_correct_state, s_finalize_ibm_module
+    ; public :: s_initialize_ibm_module, s_ibm_setup, s_ibm_correct_state, s_ibm_set_isothermal_T, s_finalize_ibm_module
 
     type(integer_field), public :: ib_markers
     $:GPU_DECLARE(create='[ib_markers]')
@@ -263,17 +263,6 @@ contains
                     Ys_IP = 0._wp
                     Ys_IP(patch_ib(patch_id)%inj_species) = 1._wp
                     call get_mixture_molecular_weight(Ys_IP, mw_IP)
-                    alpha_rho_IP(1) = pres_IP*mw_IP/(T_IP*gas_constant)
-                end if
-
-                ! Isothermal surface (chemistry conduction): reflect the image-point temperature
-                ! about the wall value and rescale the mirrored density at constant pressure, so
-                ! the ghost encodes T_ghost = 2*Twall - T_IP and the diffusion flux sees the wall
-                ! temperature at the interface. The floor guards against negative reflected T.
-                if (chemistry .and. patch_ib(patch_id)%Twall > 0._wp) then
-                    call get_mixture_molecular_weight(Ys_IP, mw_IP)
-                    T_IP = pres_IP*mw_IP/(alpha_rho_IP(1)*gas_constant)
-                    T_IP = max(2._wp*patch_ib(patch_id)%Twall - T_IP, 0.1_wp*patch_ib(patch_id)%Twall)
                     alpha_rho_IP(1) = pres_IP*mw_IP/(T_IP*gas_constant)
                 end if
 
@@ -1584,6 +1573,31 @@ contains
     end subroutine s_update_ib_lookup
 
     !> Finalize the IBM module
+
+    !> Impose the isothermal-surface temperature of isothermal IB patches on the ghost-point entries of the temperature field. The
+    !! chemistry diffusion flux reads q_T_sf directly, so reflecting the mirrored ghost temperature about Twall makes the interface
+    !! temperature equal Twall while leaving the conservative ghost state untouched (mass and momentum stay adiabatic-mirrored;
+    !! energy leaves only through the conduction flux).
+    subroutine s_ibm_set_isothermal_T(q_T_sf)
+
+        type(scalar_field), intent(inout) :: q_T_sf
+        integer                           :: i, j, k, l
+        real(wp)                          :: Tw
+
+        $:GPU_PARALLEL_LOOP(private='[i, j, k, l, Tw]')
+        do i = 1, num_gps
+            Tw = patch_ib(ghost_points(i)%ib_patch_id)%Twall
+            if (Tw > 0._wp) then
+                j = ghost_points(i)%loc(1)
+                k = ghost_points(i)%loc(2)
+                l = ghost_points(i)%loc(3)
+                q_T_sf%sf(j, k, l) = max(2._wp*Tw - q_T_sf%sf(j, k, l), 0.5_wp*Tw)
+            end if
+        end do
+        $:END_GPU_PARALLEL_LOOP()
+
+    end subroutine s_ibm_set_isothermal_T
+
     impure subroutine s_finalize_ibm_module()
 
         integer :: i
