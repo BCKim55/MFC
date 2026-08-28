@@ -522,6 +522,7 @@ contains
 
         bodyForces = .false.
         bf_x = .false.; bf_y = .false.; bf_z = .false.
+        const_mean_T = .false.
         !> amplitude, frequency, and phase shift sinusoid in each direction
         #:for dir in ['x', 'y', 'z']
             #:for param in ['k', 'w', 'p', 'g']

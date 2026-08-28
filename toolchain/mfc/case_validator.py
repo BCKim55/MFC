@@ -1185,6 +1185,12 @@ class CaseValidator:
             self.prohibit(self.get(f"p_{dir}") is None, f"p_{dir} must be specified if bf_{dir} is true")
             self.prohibit(self.get(f"g_{dir}") is None, f"g_{dir} must be specified if bf_{dir} is true")
 
+        # The mean is taken over gas cells only, so the immersed-boundary markers must exist,
+        # and the single-fluid gamma/pi_inf are used to convert the energy shift back.
+        if self.get("const_mean_T", "F") == "T":
+            self.prohibit(self.get("ib", "F") != "T", "const_mean_T requires ib")
+            self.prohibit((self.get("num_fluids", 1) or 1) != 1, "const_mean_T requires num_fluids = 1")
+
     def check_viscosity(self):
         """Checks constraints on viscosity parameters"""
         viscous = self.get("viscous", "F") == "T"

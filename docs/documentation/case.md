@@ -1090,6 +1090,7 @@ This parameter enables the use of true `pi_\infty` in bubble dynamics models whe
 | `p_x[y,z]`           | Real    | Phase shift of oscillating acceleration                                  |
 | `g_x[y,z]`           | Real    | Magnitude of background acceleration                                     |
 | `bf_spatial_support` | Logical | Enable spatially supported body force (Wei & Freund, JFM 2005)           |
+| `const_mean_T`       | Logical | Hold the gas-phase mean temperature at its initial value                 |
 
 `k_x[y,z]`, `w_x[y,z]`, `p_x[y,z]`, and `g_x[y,z]` define an oscillating acceleration in the `x[y,z]` direction with the form
 

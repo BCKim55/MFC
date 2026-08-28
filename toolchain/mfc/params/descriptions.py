@@ -222,6 +222,7 @@ DESCRIPTIONS = {
     "bf_x": "Enable body force in x-direction",
     "bf_y": "Enable body force in y-direction",
     "bf_z": "Enable body force in z-direction",
+    "const_mean_T": "Hold the gas-phase mean temperature at its initial value",
     "g_x": "Body force magnitude in x-direction",
     "g_y": "Body force magnitude in y-direction",
     "g_z": "Body force magnitude in z-direction",
