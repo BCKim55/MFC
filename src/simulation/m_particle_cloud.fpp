@@ -398,6 +398,7 @@ contains
         particle_cloud_ibs(ib_idx)%inj_species = 0
         particle_cloud_ibs(ib_idx)%burn_rate_exp = 0._wp
         particle_cloud_ibs(ib_idx)%burn_rate_pref = 0._wp
+        particle_cloud_ibs(ib_idx)%Twall = dflt_real
 
     end subroutine s_add_cloud_particle
 
