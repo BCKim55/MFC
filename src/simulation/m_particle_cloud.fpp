@@ -115,9 +115,19 @@ contains
         xmin = particle_cloud(cloud_idx)%x_centroid - 0.5_wp*length_x
         ymin = particle_cloud(cloud_idx)%y_centroid - 0.5_wp*length_y
         zmin = particle_cloud(cloud_idx)%z_centroid - 0.5_wp*length_z
-        nx_bins = max(1, ceiling(length_x/min_dist))
-        ny_bins = max(1, ceiling(length_y/min_dist))
-        nz_bins = max(1, ceiling(length_z/min_dist))
+        ! A wrapping pack needs bins that tile the cloud box exactly: the neighbor scan
+        ! identifies bin n_bins-1 with bin 0, so a partial end bin leaves periodic pairs
+        ! closer than min_dist outside the 3x3x3 stencil. Rounding down keeps every bin
+        ! at least min_dist wide.
+        if (periodic_pack) then
+            nx_bins = max(1, int(length_x/min_dist))
+            ny_bins = max(1, int(length_y/min_dist))
+            nz_bins = max(1, int(length_z/min_dist))
+        else
+            nx_bins = max(1, ceiling(length_x/min_dist))
+            ny_bins = max(1, ceiling(length_y/min_dist))
+            nz_bins = max(1, ceiling(length_z/min_dist))
+        end if
         if (num_dims < 3) nz_bins = 1
 
         if (num_dims < 3) then
@@ -403,21 +413,22 @@ contains
     end subroutine s_add_cloud_particle
 
     !> Convert a candidate particle centre to spatial-hash bin coordinates.
-    subroutine s_get_cloud_bin(px, py, pz, min_dist, periodic_pack, xmin, ymin, zmin, nx_bins, ny_bins, nz_bins, bx, by, bz)
+    subroutine s_get_cloud_bin(px, py, pz, min_dist, periodic_pack, xmin, ymin, zmin, length_x, length_y, length_z, nx_bins, &
+                               & ny_bins, nz_bins, bx, by, bz)
 
         real(wp), intent(in) :: px, py, pz, min_dist
         logical, intent(in)  :: periodic_pack
-        real(wp), intent(in) :: xmin, ymin, zmin
+        real(wp), intent(in) :: xmin, ymin, zmin, length_x, length_y, length_z
         integer, intent(in)  :: nx_bins, ny_bins, nz_bins
         integer, intent(out) :: bx, by, bz
 
         if (periodic_pack) then
-            bx = modulo(int(floor((px - xmin)/min_dist)), nx_bins)
-            by = modulo(int(floor((py - ymin)/min_dist)), ny_bins)
+            bx = modulo(int(floor((px - xmin)/(length_x/nx_bins))), nx_bins)
+            by = modulo(int(floor((py - ymin)/(length_y/ny_bins))), ny_bins)
             if (num_dims < 3) then
                 bz = 0
             else
-                bz = modulo(int(floor((pz - zmin)/min_dist)), nz_bins)
+                bz = modulo(int(floor((pz - zmin)/(length_z/nz_bins))), nz_bins)
             end if
         else
             bx = int(floor(px/min_dist))
@@ -450,7 +461,8 @@ contains
         integer                              :: dx_b, dy_b, dz_b, dz_lo, dz_hi, j
         real(wp)                             :: dist_sq, min_dist_sq, dx, dy, dz
 
-        call s_get_cloud_bin(px, py, pz, min_dist, periodic_pack, xmin, ymin, zmin, nx_bins, ny_bins, nz_bins, bx, by, bz)
+        call s_get_cloud_bin(px, py, pz, min_dist, periodic_pack, xmin, ymin, zmin, length_x, length_y, length_z, nx_bins, &
+                             & ny_bins, nz_bins, bx, by, bz)
 
         dz_lo = -1
         dz_hi = 1
