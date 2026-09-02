@@ -1193,6 +1193,10 @@ class CaseValidator:
         if self.get("const_mean_rho", "F") == "T":
             self.prohibit(self.get("ib", "F") != "T", "const_mean_rho requires ib")
             self.prohibit((self.get("num_fluids", 1) or 1) != 1, "const_mean_rho requires num_fluids = 1")
+        if self.get("Pr") is not None:
+            self.prohibit(self.get("viscous", "F") != "T", "Pr (heat conduction) requires viscous = T")
+            self.prohibit((self.get("num_fluids", 1) or 1) != 1, "Pr (heat conduction) requires num_fluids = 1")
+            self.prohibit(self.get("Pr") <= 0, "Pr must be positive")
         if self.get("const_mass_flux", "F") == "T":
             self.prohibit(self.get("ib", "F") != "T", "const_mass_flux requires ib")
             self.prohibit((self.get("num_fluids", 1) or 1) != 1, "const_mass_flux requires num_fluids = 1")

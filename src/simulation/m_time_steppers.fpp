@@ -36,17 +36,19 @@ module m_time_steppers
     type(integer_field), allocatable, dimension(:,:) :: bc_type    !< Boundary condition identifiers
     !> Cell-average primitive variables at consecutive TIMESTEPS
     type(vector_field), allocatable, dimension(:) :: q_prim_ts1, q_prim_ts2
-    real(wp), allocatable, dimension(:,:,:,:,:) :: rhs_pb
-    type(scalar_field) :: q_T_sf                !< Cell-average temperature variables at the current time-stage
-    real(wp), allocatable, dimension(:,:,:,:,:) :: rhs_mv
-    integer, private :: num_ts                  !< Number of time stages in the time-stepping scheme
-    integer :: stor                             !< storage index
-    real(wp), allocatable, dimension(:,:) :: rk_coef
-    integer, private :: num_probe_ts
-    real(wp), private :: mean_T_target          !< gas-phase mean p/rho held by const_mean_T; < 0 until captured
-    real(wp), private :: mean_rho_target        !< gas-phase mean rho held by const_mean_rho; < 0 until captured
-    real(wp), private :: mean_mass_flux_target  !< gas-phase mean rho*u held by const_mass_flux
-    logical, private :: mass_flux_target_set    !< .true. once mean_mass_flux_target is captured
+    real(wp), allocatable, dimension(:,:,:,:,:)   :: rhs_pb
+    type(scalar_field)                            :: q_T_sf  !< Cell-average temperature variables at the current time-stage
+    real(wp), allocatable, dimension(:,:,:,:,:)   :: rhs_mv
+    integer, private                              :: num_ts  !< Number of time stages in the time-stepping scheme
+    integer                                       :: stor  !< storage index
+    real(wp), allocatable, dimension(:,:)         :: rk_coef
+    integer, private                              :: num_probe_ts
+    real(wp), private                             :: mean_T_target  !< gas-phase mean p/rho held by const_mean_T
+    real(wp), private                             :: mean_rho_target  !< gas-phase mean rho held by const_mean_rho
+    real(wp), private                             :: mean_mass_flux_target  !< gas-phase mean rho*u held by const_mass_flux
+    logical, private                              :: mass_flux_target_set  !< .true. once mean_mass_flux_target is captured
+    logical, private                              :: T_target_set  !< .true. once mean_T_target is captured
+    logical, private                              :: rho_target_set  !< .true. once mean_rho_target is captured
 
     $:GPU_DECLARE(create='[q_cons_ts, q_prim_vf, q_T_sf, rhs_vf, q_prim_ts1, q_prim_ts2, rhs_mv, rhs_pb, rk_coef, stor, bc_type]')
 
@@ -76,8 +78,8 @@ contains
 #endif
         integer :: i, j  !< Generic loop iterators
 
-        mean_T_target = -1._wp
-        mean_rho_target = -1._wp
+        T_target_set = .false.
+        rho_target_set = .false.
         mass_flux_target_set = .false.
 
         if (time_stepper == time_stepper_rk1) then
@@ -656,25 +658,58 @@ contains
         call s_mpi_allreduce_sum(n_loc, n_glb)
 
         ! The first call defines the value that every later step is pulled back to
-        if (mean_T_target < 0._wp) then
+        if (.not. T_target_set) then
             mean_T_target = T_glb/n_glb
+            T_target_set = .true.
             return
         end if
 
-        shift = gammas(1)*(mean_T_target - T_glb/n_glb)
+        if (chemistry) then
+            ! Khalloufi & Capecelatro (2023) form: every gas cell receives the same temperature
+            ! increment (an internal-energy source proportional to the local density). Only the
+            ! difference of the mean enters, so it is independent of the internal-energy
+            ! reference; Cantera thermodynamics put e < 0 near 293 K, which makes the
+            ! proportional form below ill-posed.
+            shift = gammas(1)*(mean_T_target - T_glb/n_glb)
 
-        $:GPU_PARALLEL_LOOP(collapse=3, private='[j, k, l]', copyin='[shift]')
-        do l = 0, p
-            do k = 0, n
-                do j = 0, m
-                    if (ib_markers%sf(j, k, l) == 0) then
-                        q_cons_vf(eqn_idx%E)%sf(j, k, l) = q_cons_vf(eqn_idx%E)%sf(j, k, &
-                                  & l) + shift*q_cons_vf(eqn_idx%cont%beg)%sf(j, k, l)
-                    end if
+            $:GPU_PARALLEL_LOOP(collapse=3, private='[j, k, l]', copyin='[shift]')
+            do l = 0, p
+                do k = 0, n
+                    do j = 0, m
+                        if (ib_markers%sf(j, k, l) == 0) then
+                            q_cons_vf(eqn_idx%E)%sf(j, k, l) = q_cons_vf(eqn_idx%E)%sf(j, k, &
+                                      & l) + shift*q_cons_vf(eqn_idx%cont%beg)%sf(j, k, l)
+                        end if
+                    end do
                 end do
             end do
-        end do
-        $:END_GPU_PARALLEL_LOOP()
+            $:END_GPU_PARALLEL_LOOP()
+        else
+            ! Perfect/stiffened gas: rescale the internal energy so the correction is
+            ! proportional to the local temperature. Cells that were heated give back the
+            ! most and no cell can be driven through zero temperature (the uniform-increment
+            ! form cools every cell by the same dT and leaves cold pockets at ~10 K).
+            shift = mean_T_target/(T_glb/n_glb)
+
+            $:GPU_PARALLEL_LOOP(collapse=3, private='[i, j, k, l, rho, dyn_p]', copyin='[shift]')
+            do l = 0, p
+                do k = 0, n
+                    do j = 0, m
+                        if (ib_markers%sf(j, k, l) == 0) then
+                            rho = q_cons_vf(eqn_idx%cont%beg)%sf(j, k, l)
+                            dyn_p = 0._wp
+                            $:GPU_LOOP(parallelism='[seq]')
+                            do i = eqn_idx%mom%beg, eqn_idx%mom%end
+                                dyn_p = dyn_p + 0.5_wp*q_cons_vf(i)%sf(j, k, l)**2._wp/rho
+                            end do
+                            q_cons_vf(eqn_idx%E)%sf(j, k, l) = dyn_p + pi_infs(1) + shift*(q_cons_vf(eqn_idx%E)%sf(j, k, &
+                                      & l) - dyn_p - pi_infs(1))
+                        end if
+                    end do
+                end do
+            end do
+            $:END_GPU_PARALLEL_LOOP()
+        end if
 
     end subroutine s_hold_mean_temperature
 
@@ -684,7 +719,7 @@ contains
 
         type(scalar_field), dimension(sys_size), intent(inout) :: q_cons_vf
         real(wp)                                               :: r_loc, n_loc, r_glb, n_glb, shift
-        integer                                                :: j, k, l
+        integer                                                :: i, j, k, l
 
         r_loc = 0._wp; n_loc = 0._wp
 
@@ -705,19 +740,29 @@ contains
         call s_mpi_allreduce_sum(n_loc, n_glb)
 
         ! The first call defines the value that every later step is pulled back to
-        if (mean_rho_target < 0._wp) then
+        if (.not. rho_target_set) then
             mean_rho_target = r_glb/n_glb
+            rho_target_set = .true.
             return
         end if
 
-        shift = mean_rho_target - r_glb/n_glb
+        ! Rescale (rho, rho u, E - pi_inf) by the same factor: the mass is added with the
+        ! local velocity and specific internal energy, so u and e (hence T) are unchanged.
+        ! Adding mass at fixed E (the literal K&C source) dilutes e by delta/rho every step
+        ! and, with the ghost-cell wall flux of a bed (~25 %/flow-through), cools the gas
+        ! by tens of percent and drives low-density cells to zero temperature.
+        shift = mean_rho_target/(r_glb/n_glb)
 
-        $:GPU_PARALLEL_LOOP(collapse=3, private='[j, k, l]', copyin='[shift]')
+        $:GPU_PARALLEL_LOOP(collapse=3, private='[i, j, k, l]', copyin='[shift]')
         do l = 0, p
             do k = 0, n
                 do j = 0, m
                     if (ib_markers%sf(j, k, l) == 0) then
-                        q_cons_vf(eqn_idx%cont%beg)%sf(j, k, l) = q_cons_vf(eqn_idx%cont%beg)%sf(j, k, l) + shift
+                        $:GPU_LOOP(parallelism='[seq]')
+                        do i = eqn_idx%cont%beg, eqn_idx%mom%end
+                            q_cons_vf(i)%sf(j, k, l) = shift*q_cons_vf(i)%sf(j, k, l)
+                        end do
+                        q_cons_vf(eqn_idx%E)%sf(j, k, l) = pi_infs(1) + shift*(q_cons_vf(eqn_idx%E)%sf(j, k, l) - pi_infs(1))
                     end if
                 end do
             end do

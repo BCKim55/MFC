@@ -223,6 +223,7 @@ DESCRIPTIONS = {
     "bf_y": "Enable body force in y-direction",
     "bf_z": "Enable body force in z-direction",
     "const_mean_T": "Hold the gas-phase mean temperature at its initial value (Khalloufi & Capecelatro 2023 thermal forcing)",
+    "Pr": "Prandtl number: enables Fourier heat conduction with thermal conductivity mu*c_p/Pr (single fluid, viscous = T); off if unset",
     "const_mean_rho": "Hold the gas-phase mean density at its initial value (Khalloufi & Capecelatro 2023 mass source)",
     "const_mass_flux": "Hold the gas-phase mean x-momentum at its initial value (Khalloufi & Capecelatro 2023 constant mass flow rate)",
     "g_x": "Body force magnitude in x-direction",

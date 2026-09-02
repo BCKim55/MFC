@@ -523,6 +523,7 @@ contains
         bodyForces = .false.
         bf_x = .false.; bf_y = .false.; bf_z = .false.
         const_mean_T = .false.
+        Pr = dflt_real
         const_mean_rho = .false.
         const_mass_flux = .false.
         !> amplitude, frequency, and phase shift sinusoid in each direction

@@ -811,6 +811,11 @@ contains
             end if
         end if
         ! END: Dimensional Splitting Loop
+        if (Pr > 0._wp .and. .not. igr) then
+            call nvtxStartRange("RHS-CONDUCTION")
+            call s_compute_heat_conduction(q_prim_qp%vf, ib_markers, rhs_vf)
+            call nvtxEndRange
+        end if
 
         ! RHS additions for hypoelasticity (interface-consistent path, after all sweeps)
         if (hypo_nc_mode == hypo_nc_mode_interface) then
