@@ -36,14 +36,17 @@ module m_time_steppers
     type(integer_field), allocatable, dimension(:,:) :: bc_type    !< Boundary condition identifiers
     !> Cell-average primitive variables at consecutive TIMESTEPS
     type(vector_field), allocatable, dimension(:) :: q_prim_ts1, q_prim_ts2
-    real(wp), allocatable, dimension(:,:,:,:,:)   :: rhs_pb
-    type(scalar_field)                            :: q_T_sf         !< Cell-average temperature variables at the current time-stage
-    real(wp), allocatable, dimension(:,:,:,:,:)   :: rhs_mv
-    integer, private                              :: num_ts         !< Number of time stages in the time-stepping scheme
-    integer                                       :: stor           !< storage index
-    real(wp), allocatable, dimension(:,:)         :: rk_coef
-    integer, private                              :: num_probe_ts
-    real(wp), private                             :: mean_T_target  !< gas-phase mean p/rho held by const_mean_T; < 0 until captured
+    real(wp), allocatable, dimension(:,:,:,:,:) :: rhs_pb
+    type(scalar_field) :: q_T_sf                !< Cell-average temperature variables at the current time-stage
+    real(wp), allocatable, dimension(:,:,:,:,:) :: rhs_mv
+    integer, private :: num_ts                  !< Number of time stages in the time-stepping scheme
+    integer :: stor                             !< storage index
+    real(wp), allocatable, dimension(:,:) :: rk_coef
+    integer, private :: num_probe_ts
+    real(wp), private :: mean_T_target          !< gas-phase mean p/rho held by const_mean_T; < 0 until captured
+    real(wp), private :: mean_rho_target        !< gas-phase mean rho held by const_mean_rho; < 0 until captured
+    real(wp), private :: mean_mass_flux_target  !< gas-phase mean rho*u held by const_mass_flux
+    logical, private :: mass_flux_target_set    !< .true. once mean_mass_flux_target is captured
 
     $:GPU_DECLARE(create='[q_cons_ts, q_prim_vf, q_T_sf, rhs_vf, q_prim_ts1, q_prim_ts2, rhs_mv, rhs_pb, rk_coef, stor, bc_type]')
 
@@ -74,6 +77,8 @@ contains
         integer :: i, j  !< Generic loop iterators
 
         mean_T_target = -1._wp
+        mean_rho_target = -1._wp
+        mass_flux_target_set = .false.
 
         if (time_stepper == time_stepper_rk1) then
             num_ts = 1
@@ -600,6 +605,8 @@ contains
         ! Adaptive dt: final stage
         if (adap_dt) call s_adaptive_dt_bubble(3)
 
+        if (const_mean_rho) call s_hold_mean_density(q_cons_ts(1)%vf)
+        if (const_mass_flux) call s_hold_mean_mass_flux(q_cons_ts(1)%vf)
         if (const_mean_T) call s_hold_mean_temperature(q_cons_ts(1)%vf)
 
         call nvtxEndRange
@@ -615,11 +622,9 @@ contains
 
     end subroutine s_tvd_rk
 
-    !> Bubble source part in Strang operator splitting scheme
-    !> Hold the gas-phase mean temperature at its initial value by shifting the internal energy of every cell by the same amount
-    !! once per time step. A body force in a periodic box has no energy equilibrium, so without this the temperature climbs without
-    !! bound and the Mach number drifts off target. Method (i) of Jagannathan & Donzis, JFM 789 (2016). p/rho is used in place of T,
-    !! to which it is proportional at fixed composition.
+    !> Thermal forcing of Khalloufi & Capecelatro (2023): every gas cell receives the same temperature increment (an internal-energy
+    !! source proportional to the local density) sized so that the gas-phase mean p/rho returns to its initial value. Ghost cells
+    !! are left alone; touching them feeds a spurious wall state into the next stage.
     impure subroutine s_hold_mean_temperature(q_cons_vf)
 
         type(scalar_field), dimension(sys_size), intent(inout) :: q_cons_vf
@@ -656,29 +661,15 @@ contains
             return
         end if
 
-        ! Scale the internal energy rather than shifting it: the correction is then
-        ! proportional to the local temperature, so cells that were heated give back the
-        ! most and quiescent cells cannot be driven to a negative temperature.
-        ! Scale the internal energy rather than shifting it: the correction is then
-        ! proportional to the local temperature, so cells that were heated give back the
-        ! most and quiescent cells cannot be driven to a negative temperature. Ghost
-        ! cells are left alone; scaling them feeds a spuriously cold wall state into the
-        ! next stage's fluxes and cools the first fluid cell off every surface.
-        shift = mean_T_target/(T_glb/n_glb)
+        shift = gammas(1)*(mean_T_target - T_glb/n_glb)
 
-        $:GPU_PARALLEL_LOOP(collapse=3, private='[i, j, k, l, rho, dyn_p]', copyin='[shift]')
+        $:GPU_PARALLEL_LOOP(collapse=3, private='[j, k, l]', copyin='[shift]')
         do l = 0, p
             do k = 0, n
                 do j = 0, m
                     if (ib_markers%sf(j, k, l) == 0) then
-                        rho = q_cons_vf(eqn_idx%cont%beg)%sf(j, k, l)
-                        dyn_p = 0._wp
-                        $:GPU_LOOP(parallelism='[seq]')
-                        do i = eqn_idx%mom%beg, eqn_idx%mom%end
-                            dyn_p = dyn_p + 0.5_wp*q_cons_vf(i)%sf(j, k, l)**2._wp/rho
-                        end do
-                        q_cons_vf(eqn_idx%E)%sf(j, k, l) = dyn_p + pi_infs(1) + shift*(q_cons_vf(eqn_idx%E)%sf(j, k, &
-                                  & l) - dyn_p - pi_infs(1))
+                        q_cons_vf(eqn_idx%E)%sf(j, k, l) = q_cons_vf(eqn_idx%E)%sf(j, k, &
+                                  & l) + shift*q_cons_vf(eqn_idx%cont%beg)%sf(j, k, l)
                     end if
                 end do
             end do
@@ -686,6 +677,107 @@ contains
         $:END_GPU_PARALLEL_LOOP()
 
     end subroutine s_hold_mean_temperature
+
+    !> Mass source of Khalloufi & Capecelatro (2023): the same density increment is added to every gas cell, momentum and energy
+    !! untouched, so that the gas-phase mean density returns to its initial value.
+    impure subroutine s_hold_mean_density(q_cons_vf)
+
+        type(scalar_field), dimension(sys_size), intent(inout) :: q_cons_vf
+        real(wp)                                               :: r_loc, n_loc, r_glb, n_glb, shift
+        integer                                                :: j, k, l
+
+        r_loc = 0._wp; n_loc = 0._wp
+
+        $:GPU_PARALLEL_LOOP(collapse=3, private='[j, k, l]', reduction='[[r_loc, n_loc]]', reductionOp='[+]')
+        do l = 0, p
+            do k = 0, n
+                do j = 0, m
+                    if (ib_markers%sf(j, k, l) == 0) then
+                        r_loc = r_loc + q_cons_vf(eqn_idx%cont%beg)%sf(j, k, l)
+                        n_loc = n_loc + 1._wp
+                    end if
+                end do
+            end do
+        end do
+        $:END_GPU_PARALLEL_LOOP()
+
+        call s_mpi_allreduce_sum(r_loc, r_glb)
+        call s_mpi_allreduce_sum(n_loc, n_glb)
+
+        ! The first call defines the value that every later step is pulled back to
+        if (mean_rho_target < 0._wp) then
+            mean_rho_target = r_glb/n_glb
+            return
+        end if
+
+        shift = mean_rho_target - r_glb/n_glb
+
+        $:GPU_PARALLEL_LOOP(collapse=3, private='[j, k, l]', copyin='[shift]')
+        do l = 0, p
+            do k = 0, n
+                do j = 0, m
+                    if (ib_markers%sf(j, k, l) == 0) then
+                        q_cons_vf(eqn_idx%cont%beg)%sf(j, k, l) = q_cons_vf(eqn_idx%cont%beg)%sf(j, k, l) + shift
+                    end if
+                end do
+            end do
+        end do
+        $:END_GPU_PARALLEL_LOOP()
+
+    end subroutine s_hold_mean_density
+
+    !> Constant mass flow rate of Khalloufi & Capecelatro (2023): the same x-momentum increment is added to every gas cell so that
+    !! the gas-phase mean rho*u returns to its initial value, and the work it does goes into the total energy so that the internal
+    !! energy is unchanged.
+    impure subroutine s_hold_mean_mass_flux(q_cons_vf)
+
+        type(scalar_field), dimension(sys_size), intent(inout) :: q_cons_vf
+        real(wp)                                               :: f_loc, n_loc, f_glb, n_glb, rho, mom, shift
+        integer                                                :: j, k, l
+
+        f_loc = 0._wp; n_loc = 0._wp
+
+        $:GPU_PARALLEL_LOOP(collapse=3, private='[j, k, l]', reduction='[[f_loc, n_loc]]', reductionOp='[+]')
+        do l = 0, p
+            do k = 0, n
+                do j = 0, m
+                    if (ib_markers%sf(j, k, l) == 0) then
+                        f_loc = f_loc + q_cons_vf(eqn_idx%mom%beg)%sf(j, k, l)
+                        n_loc = n_loc + 1._wp
+                    end if
+                end do
+            end do
+        end do
+        $:END_GPU_PARALLEL_LOOP()
+
+        call s_mpi_allreduce_sum(f_loc, f_glb)
+        call s_mpi_allreduce_sum(n_loc, n_glb)
+
+        ! The first call defines the value that every later step is pulled back to
+        if (.not. mass_flux_target_set) then
+            mean_mass_flux_target = f_glb/n_glb
+            mass_flux_target_set = .true.
+            return
+        end if
+
+        shift = mean_mass_flux_target - f_glb/n_glb
+
+        $:GPU_PARALLEL_LOOP(collapse=3, private='[j, k, l, rho, mom]', copyin='[shift]')
+        do l = 0, p
+            do k = 0, n
+                do j = 0, m
+                    if (ib_markers%sf(j, k, l) == 0) then
+                        rho = q_cons_vf(eqn_idx%cont%beg)%sf(j, k, l)
+                        mom = q_cons_vf(eqn_idx%mom%beg)%sf(j, k, l)
+                        q_cons_vf(eqn_idx%E)%sf(j, k, l) = q_cons_vf(eqn_idx%E)%sf(j, k, l) + shift*(mom + 0.5_wp*shift)/rho
+                        q_cons_vf(eqn_idx%mom%beg)%sf(j, k, l) = mom + shift
+                    end if
+                end do
+            end do
+        end do
+        $:END_GPU_PARALLEL_LOOP()
+
+    end subroutine s_hold_mean_mass_flux
 
     impure subroutine s_adaptive_dt_bubble(stage)
 

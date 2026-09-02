@@ -809,6 +809,8 @@ def _load():
         _r(f"p_{d}", REAL, math=r"\f$\phi_" + d + r"\f$")
         _r(f"bf_{d}", LOG)
     _r("const_mean_T", LOG)
+    _r("const_mean_rho", LOG)
+    _r("const_mass_flux", LOG)
 
     # Interfacial flow inputs
     _r("normMag", REAL)
@@ -1363,6 +1365,8 @@ _nv(
     "bf_y",
     "bf_z",
     "const_mean_T",
+    "const_mean_rho",
+    "const_mass_flux",
     "bf_spatial_support",
     "spatial_bf",
     "k_x",
