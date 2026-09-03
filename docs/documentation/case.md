@@ -1091,7 +1091,8 @@ This parameter enables the use of true `pi_\infty` in bubble dynamics models whe
 | `g_x[y,z]`           | Real    | Magnitude of background acceleration                                     |
 | `bf_spatial_support` | Logical | Enable spatially supported body force (Wei & Freund, JFM 2005)           |
 | `const_mean_T`       | Logical | Hold the gas-phase mean temperature at its initial value (Khalloufi & Capecelatro 2023 thermal forcing) |
-| `Pr`                 | Real    | Prandtl number: enables Fourier heat conduction with thermal conductivity \f$\mu c_p/\mathrm{Pr}\f$ (single fluid, `viscous = T`); off if unset |
+| `conduction`         | Logical | Fourier heat conduction with thermal conductivity \f$\mu c_p/\mathrm{Pr}\f$ (single fluid, `viscous = T`) |
+| `Pr`                 | Real    | Prandtl number used by `conduction` (default 0.7) |
 | `const_mean_rho`     | Logical | Hold the gas-phase mean density at its initial value (Khalloufi & Capecelatro 2023 mass source) |
 | `const_mass_flux`    | Logical | Hold the gas-phase mean x-momentum at its initial value (Khalloufi & Capecelatro 2023 constant mass flow rate) |
 

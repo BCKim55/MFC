@@ -523,6 +523,7 @@ contains
         bodyForces = .false.
         bf_x = .false.; bf_y = .false.; bf_z = .false.
         const_mean_T = .false.
+        conduction = .false.
         Pr = dflt_real
         const_mean_rho = .false.
         const_mass_flux = .false.
@@ -954,6 +955,10 @@ contains
         $:GPU_UPDATE(device='[dt, sys_size, buff_size, eqn_idx, mpp_lim, bubbles_euler, hypoelasticity, alt_soundspeed, &
                      & avg_state, model_eqns, mixture_err, grid_geometry, cyl_coord, mp_weno, weno_eps, teno_CT, low_Mach]')
         $:GPU_UPDATE(device='[riemann_hypo_ADC, ADC_kappa, hll_u_interface, hypo_hll_interface_rhs, hypo_nc_mode]')
+
+        ! Fourier conduction: Pr defaults to 0.7 (air) when the case does not set it
+        if (conduction .and. Pr <= 0._wp) Pr = 0.7_wp
+        $:GPU_UPDATE(device='[conduction, Pr]')
 
         $:GPU_UPDATE(device='[Bx0]')
 

@@ -34,6 +34,7 @@ _VALID_TARGETS = ("pre", "sim", "post")
 SIM_GPU_DECL_VARS = {
     "ADC_kappa",
     "Pr",
+    "conduction",
     "Bx0",
     "Ca",
     "R0ref",

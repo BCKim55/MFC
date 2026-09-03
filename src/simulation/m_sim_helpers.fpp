@@ -225,7 +225,7 @@ contains
                 vcfl_dt = cfl_target*(dx(j)**2._wp)/maxval(1/(rho*Re_l))
             end if
             ! Fourier conduction: thermal diffusivity gamma*nu/Pr tightens the viscous limit
-            if (Pr > 0._wp) vcfl_dt = vcfl_dt*min(1._wp, Pr/(1._wp + 1._wp/gammas(1)))
+            if (conduction) vcfl_dt = vcfl_dt*min(1._wp, Pr/(1._wp + 1._wp/gammas(1)))
             max_dt = min(max_dt, vcfl_dt)
         end if
 

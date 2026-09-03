@@ -811,7 +811,7 @@ contains
             end if
         end if
         ! END: Dimensional Splitting Loop
-        if (Pr > 0._wp .and. .not. igr) then
+        if (conduction .and. .not. igr) then
             call nvtxStartRange("RHS-CONDUCTION")
             call s_compute_heat_conduction(q_prim_qp%vf, ib_markers, rhs_vf)
             call nvtxEndRange
